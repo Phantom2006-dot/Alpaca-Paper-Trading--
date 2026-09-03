@@ -9,6 +9,7 @@ import {
   RunStrategyResponse,
   FlattenAgentPositionsResponse,
   RunBacktestResponse,
+  OptimizeBacktestResponse,
 } from "@workspace/api-zod";
 
 type Bar = {
@@ -49,6 +50,7 @@ export const guardrails = {
   adxMax: 25,
   minVolumeRatio: 1,
 };
+type StrategyRules = typeof guardrails;
 
 let lastRunAt: string | null = null;
 let totalScans = 0;
@@ -309,6 +311,7 @@ function snapshotFromBars(
   bars: Bar[],
   position: Position | undefined,
   extremes = trailingExtremes,
+  rules: StrategyRules = guardrails,
 ): Snapshot {
   const closes = bars.map((bar) => bar.close);
   const window = closes.slice(-20);
@@ -333,30 +336,30 @@ function snapshotFromBars(
 
   let signal: Snapshot["signal"] = "hold";
   let tradeBlockedReason: string | null = null;
-  if (position && Math.abs(zScore) >= guardrails.invalidationZ) {
+  if (position && Math.abs(zScore) >= rules.invalidationZ) {
     signal = "invalidation";
   } else if (
     position &&
-    ((position.side === "long" && zScore >= guardrails.exitZ) ||
-      (position.side === "short" && zScore <= guardrails.exitZ))
+    ((position.side === "long" && zScore >= rules.exitZ) ||
+      (position.side === "short" && zScore <= rules.exitZ))
   ) {
     signal = "exit";
   } else if (
     position &&
-    guardrails.trailingStop &&
+    rules.trailingStop &&
     ((position.side === "long" && price <= nextExtreme * 0.98) ||
       (position.side === "short" && price >= nextExtreme * 1.02))
   ) {
     signal = "invalidation";
-  } else if (!position && Math.abs(zScore) >= guardrails.entryZ) {
-    if (adx > guardrails.adxMax) {
+  } else if (!position && Math.abs(zScore) >= rules.entryZ) {
+    if (adx > rules.adxMax) {
       signal = "blocked";
       tradeBlockedReason = `ADX ${adx.toFixed(1)} indicates a trending regime`;
-    } else if (volumeRatio < guardrails.minVolumeRatio) {
+    } else if (volumeRatio < rules.minVolumeRatio) {
       signal = "blocked";
       tradeBlockedReason = `Volume is ${Math.round(volumeRatio * 100)}% of its 20-day average`;
     } else {
-      signal = zScore <= -guardrails.entryZ ? "long_entry" : "short_entry";
+      signal = zScore <= -rules.entryZ ? "long_entry" : "short_entry";
     }
   }
 
@@ -374,7 +377,7 @@ function snapshotFromBars(
     positionSide: side,
     unrealizedPnl: position?.unrealizedPnl ?? 0,
     signal,
-    regime: bars.length < 22 ? "insufficient_data" : adx <= guardrails.adxMax ? "mean_reverting" : "trending",
+    regime: bars.length < 22 ? "insufficient_data" : adx <= rules.adxMax ? "mean_reverting" : "trending",
     updatedAt: new Date().toISOString(),
     tradeBlockedReason,
   });
@@ -646,6 +649,8 @@ export async function runBacktest(
   end: string,
   initialCapital: number,
   log: Logger,
+  rules: StrategyRules = guardrails,
+  historicalOverride?: Array<{ symbol: string; bars: Bar[] }>,
 ) {
   if (!hasCredentials()) {
     throw new Error("Alpaca credentials are required for a historical backtest.");
@@ -662,12 +667,14 @@ export async function runBacktest(
     throw new Error("At least one symbol is required for a backtest.");
   }
 
-  const historical = await Promise.all(
-    selectedSymbols.map(async (symbol) => ({
-      symbol,
-      bars: await fetchHistoricalBars(symbol, start, end),
-    })),
-  );
+  const historical =
+    historicalOverride ??
+    (await Promise.all(
+      selectedSymbols.map(async (symbol) => ({
+        symbol,
+        bars: await fetchHistoricalBars(symbol, start, end),
+      })),
+    ));
   const usable = historical.filter(({ bars }) => bars.length >= 22);
   if (!usable.length) {
     throw new Error("Alpaca returned fewer than 22 daily bars for the selected range.");
@@ -735,6 +742,7 @@ export async function runBacktest(
             }
           : undefined,
         state.extremes,
+        rules,
       );
       state.lastPrice = price;
       const barAt = (bars[index].timestamp ?? end).slice(0, 10);
@@ -769,7 +777,7 @@ export async function runBacktest(
         (snapshot.signal === "long_entry" || snapshot.signal === "short_entry")
       ) {
         const quantity = Math.floor(
-          (state.capital * (guardrails.maxPositionPct / 100)) / price,
+          (state.capital * (rules.maxPositionPct / 100)) / price,
         );
         if (quantity > 0) {
           state.position = {
@@ -868,6 +876,112 @@ export async function runBacktest(
     winRate: trades.length ? (winningTrades / trades.length) * 100 : 0,
     benchmarkReturnPct,
     trades: trades.slice(-100),
+    ranAt,
+  });
+}
+
+export async function optimizeBacktest(
+  symbols: string[],
+  start: string,
+  end: string,
+  initialCapital: number,
+  log: Logger,
+) {
+  if (!hasCredentials()) {
+    throw new Error("Alpaca credentials are required to optimize the strategy.");
+  }
+
+  const selectedSymbols = [
+    ...new Set(
+      symbols
+        .map((symbol) => symbol.trim().toUpperCase())
+        .filter(Boolean),
+    ),
+  ].slice(0, 8);
+  const historical = await Promise.all(
+    selectedSymbols.map(async (symbol) => ({
+      symbol,
+      bars: await fetchHistoricalBars(symbol, start, end),
+    })),
+  );
+  const baseline = await runBacktest(
+    selectedSymbols,
+    start,
+    end,
+    initialCapital,
+    log,
+    guardrails,
+    historical,
+  );
+  const entryZValues = [1.25, 1.5, 1.75, 2, 2.25, 2.5];
+  const adxMaxValues = [15, 20, 25, 30];
+  const volumeRatioValues = [0.8, 1, 1.2];
+  const candidates: Array<{
+    settings: {
+      entryZ: number;
+      adxMax: number;
+      minVolumeRatio: number;
+    };
+    score: number;
+    returnPct: number;
+    maxDrawdownPct: number;
+    totalTrades: number;
+    winRate: number;
+    result: Awaited<ReturnType<typeof runBacktest>>;
+  }> = [];
+
+  for (const entryZ of entryZValues) {
+    for (const adxMax of adxMaxValues) {
+      for (const minVolumeRatio of volumeRatioValues) {
+        const settings = { entryZ, adxMax, minVolumeRatio };
+        const result = await runBacktest(
+          selectedSymbols,
+          start,
+          end,
+          initialCapital,
+          log,
+          { ...guardrails, ...settings },
+          historical,
+        );
+        candidates.push({
+          settings,
+          score: result.returnPct - result.maxDrawdownPct * 0.5,
+          returnPct: result.returnPct,
+          maxDrawdownPct: result.maxDrawdownPct,
+          totalTrades: result.totalTrades,
+          winRate: result.winRate,
+          result,
+        });
+      }
+    }
+  }
+
+  candidates.sort((left, right) => right.score - left.score);
+  const winner = candidates[0];
+  if (!winner) throw new Error("No optimization candidates were evaluated.");
+  const ranAt = new Date().toISOString();
+  log.info(
+    {
+      candidatesTested: candidates.length,
+      bestSettings: winner.settings,
+      baselineReturnPct: baseline.returnPct,
+      bestReturnPct: winner.returnPct,
+    },
+    "Strategy optimization completed",
+  );
+
+  return OptimizeBacktestResponse.parse({
+    mode: "paper",
+    timeframe: "1Day",
+    symbols: baseline.symbols,
+    start,
+    end,
+    initialCapital,
+    candidatesTested: candidates.length,
+    baseline,
+    best: winner.result,
+    bestSettings: winner.settings,
+    leaderboard: candidates.slice(0, 10).map(({ result, ...candidate }) => candidate),
     ranAt,
   });
 }

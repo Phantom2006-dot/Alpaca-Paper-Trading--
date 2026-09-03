@@ -145,6 +145,37 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /agent/optimize:
+    post:
+      operationId: optimizeBacktest
+      tags: [agent]
+      summary: Optimize strategy thresholds on historical data
+      description: Tests a bounded grid of strategy thresholds against Alpaca historical bars without submitting orders or changing live settings.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OptimizeBacktestInput"
+      responses:
+        "200":
+          description: Optimization result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OptimizationResult"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Alpaca market data unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     HealthStatus:
@@ -179,6 +210,52 @@ components:
           type: number
           exclusiveMinimum: 0
       required: [symbols, start, end, initialCapital]
+    OptimizeBacktestInput:
+      type: object
+      properties:
+        symbols:
+          type: array
+          items:
+            type: string
+            minLength: 1
+          minItems: 1
+          maxItems: 8
+        start:
+          type: string
+          format: date
+        end:
+          type: string
+          format: date
+        initialCapital:
+          type: number
+          exclusiveMinimum: 0
+      required: [symbols, start, end, initialCapital]
+    OptimizationSettings:
+      type: object
+      properties:
+        entryZ:
+          type: number
+        adxMax:
+          type: number
+        minVolumeRatio:
+          type: number
+      required: [entryZ, adxMax, minVolumeRatio]
+    OptimizationCandidate:
+      type: object
+      properties:
+        settings:
+          $ref: "#/components/schemas/OptimizationSettings"
+        score:
+          type: number
+        returnPct:
+          type: number
+        maxDrawdownPct:
+          type: number
+        totalTrades:
+          type: number
+        winRate:
+          type: number
+      required: [settings, score, returnPct, maxDrawdownPct, totalTrades, winRate]
     BacktestTrade:
       type: object
       properties:
@@ -254,6 +331,42 @@ components:
           type: string
           format: date-time
       required: [mode, timeframe, symbols, start, end, barsLoaded, initialCapital, finalEquity, netPnl, returnPct, maxDrawdownPct, totalTrades, winningTrades, losingTrades, winRate, benchmarkReturnPct, trades, ranAt]
+    OptimizationResult:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [paper]
+        timeframe:
+          type: string
+        symbols:
+          type: array
+          items:
+            type: string
+        start:
+          type: string
+          format: date
+        end:
+          type: string
+          format: date
+        initialCapital:
+          type: number
+        candidatesTested:
+          type: number
+        baseline:
+          $ref: "#/components/schemas/BacktestResult"
+        best:
+          $ref: "#/components/schemas/BacktestResult"
+        bestSettings:
+          $ref: "#/components/schemas/OptimizationSettings"
+        leaderboard:
+          type: array
+          items:
+            $ref: "#/components/schemas/OptimizationCandidate"
+        ranAt:
+          type: string
+          format: date-time
+      required: [mode, timeframe, symbols, start, end, initialCapital, candidatesTested, baseline, best, bestSettings, leaderboard, ranAt]
     AgentAccount:
       type: object
       properties:

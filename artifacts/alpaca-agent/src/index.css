@@ -627,6 +627,12 @@
 .backtest-fields label > small { color: hsl(var(--muted-foreground)); font-size: 9px; }
 .backtest-form-footer { border-top: 1px solid hsl(var(--border)); }
 .data-table td small { color: hsl(var(--muted-foreground)); display: block; font-family: var(--app-font-mono); font-size: 9px; margin-top: 4px; }
+.optimization-summary { border-bottom: 1px solid hsl(var(--border)); border-top: 1px solid hsl(var(--border)); display: grid; grid-template-columns: repeat(4, 1fr); }
+.optimization-summary > div { border-right: 1px solid hsl(var(--border)); padding: 16px 22px; }
+.optimization-summary > div:last-child { border-right: 0; }
+.optimization-summary span { color: hsl(var(--muted-foreground)); display: block; font-family: var(--app-font-mono); font-size: 9px; text-transform: uppercase; }
+.optimization-summary strong { display: block; font-family: var(--app-font-mono); font-size: 14px; margin-top: 7px; }
+.optimization-note { color: hsl(var(--muted-foreground)); font-size: 10px; line-height: 1.6; padding: 13px 22px 17px; }
 
 @media (max-width: 1080px) {
   .page-wrap { padding-left: 28px; padding-right: 28px; }
@@ -655,6 +661,9 @@
   .metric-item:nth-child(-n+3) { border-bottom: 1px solid hsl(var(--border)); }
   .dashboard-grid, .logic-layout, .settings-layout, .explain-grid { grid-template-columns: 1fr; }
   .backtest-fields { grid-template-columns: 1fr 1fr; }
+  .optimization-summary { grid-template-columns: 1fr 1fr; }
+  .optimization-summary > div:nth-child(2) { border-right: 0; }
+  .optimization-summary > div:nth-child(-n+2) { border-bottom: 1px solid hsl(var(--border)); }
   .guardrail-list { grid-template-columns: 1fr; }
   .flow-diagram { align-items: stretch; flex-direction: column; }
   .flow-line { height: 17px; margin-left: 25px; width: 1px; }
@@ -677,6 +686,9 @@
   .activity-list { padding-left: 16px; padding-right: 16px; }
   .formula-box { align-items: flex-start; flex-direction: column; gap: 8px; }
   .backtest-fields { grid-template-columns: 1fr; padding-left: 16px; padding-right: 16px; }
+  .optimization-summary { grid-template-columns: 1fr; }
+  .optimization-summary > div { border-bottom: 1px solid hsl(var(--border)); border-right: 0; }
+  .optimization-summary > div:last-child { border-bottom: 0; }
   .connection-state { font-size: 8px; }
   .settings-field-grid { grid-template-columns: 1fr; }
   .settings-field-grid > div + div { border-left: 0; border-top: 1px solid hsl(var(--border)); }

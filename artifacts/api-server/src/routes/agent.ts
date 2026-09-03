@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 
 import {
   GetMarketSnapshotParams,
+  OptimizeBacktestBody,
   RunBacktestBody,
   RunStrategyBody,
 } from "@workspace/api-zod";
@@ -11,6 +12,7 @@ import {
   getDashboard,
   getMarketSnapshot,
   getStatus,
+  optimizeBacktest,
   runBacktest,
   runStrategy,
 } from "../lib/strategy";
@@ -66,6 +68,31 @@ router.post("/agent/backtest", async (req, res): Promise<void> => {
     req.log.error({ err: error }, "Historical backtest failed");
     res.status(502).json({
       error: error instanceof Error ? error.message : "Historical backtest failed",
+    });
+  }
+});
+
+router.post("/agent/optimize", async (req, res): Promise<void> => {
+  const parsed = OptimizeBacktestBody.safeParse(req.body);
+  if (!parsed.success) {
+    req.log.warn({ errors: parsed.error.message }, "Invalid optimization input");
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  try {
+    res.json(
+      await optimizeBacktest(
+        parsed.data.symbols,
+        parsed.data.start.toISOString().slice(0, 10),
+        parsed.data.end.toISOString().slice(0, 10),
+        parsed.data.initialCapital,
+        req.log,
+      ),
+    );
+  } catch (error) {
+    req.log.error({ err: error }, "Strategy optimization failed");
+    res.status(502).json({
+      error: error instanceof Error ? error.message : "Strategy optimization failed",
     });
   }
 });

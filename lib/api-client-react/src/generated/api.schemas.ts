@@ -26,6 +26,34 @@ export interface BacktestInput {
   initialCapital: number;
 }
 
+export interface OptimizeBacktestInput {
+  /**
+     * @minItems 1
+     * @maxItems 8
+     * @items.minLength 1
+     */
+  symbols: string[];
+  start: string;
+  end: string;
+  /** @exclusiveMinimum 0 */
+  initialCapital: number;
+}
+
+export interface OptimizationSettings {
+  entryZ: number;
+  adxMax: number;
+  minVolumeRatio: number;
+}
+
+export interface OptimizationCandidate {
+  settings: OptimizationSettings;
+  score: number;
+  returnPct: number;
+  maxDrawdownPct: number;
+  totalTrades: number;
+  winRate: number;
+}
+
 export type BacktestTradeSide = typeof BacktestTradeSide[keyof typeof BacktestTradeSide];
 
 
@@ -72,6 +100,28 @@ export interface BacktestResult {
   winRate: number;
   benchmarkReturnPct: number;
   trades: BacktestTrade[];
+  ranAt: string;
+}
+
+export type OptimizationResultMode = typeof OptimizationResultMode[keyof typeof OptimizationResultMode];
+
+
+export const OptimizationResultMode = {
+  paper: 'paper',
+} as const;
+
+export interface OptimizationResult {
+  mode: OptimizationResultMode;
+  timeframe: string;
+  symbols: string[];
+  start: string;
+  end: string;
+  initialCapital: number;
+  candidatesTested: number;
+  baseline: BacktestResult;
+  best: BacktestResult;
+  bestSettings: OptimizationSettings;
+  leaderboard: OptimizationCandidate[];
   ranAt: string;
 }
 

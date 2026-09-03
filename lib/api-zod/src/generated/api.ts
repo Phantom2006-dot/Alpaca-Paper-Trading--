@@ -261,3 +261,112 @@ export const RunBacktestResponse = zod.object({
 })
 
 
+/**
+ * Tests a bounded grid of strategy thresholds against Alpaca historical bars without submitting orders or changing live settings.
+ * @summary Optimize strategy thresholds on historical data
+ */
+
+export const optimizeBacktestBodySymbolsMax = 8;
+
+export const optimizeBacktestBodyInitialCapitalExclusiveMin = 0;
+
+
+
+export const OptimizeBacktestBody = zod.object({
+  "symbols": zod.array(zod.string().min(1)).min(1).max(optimizeBacktestBodySymbolsMax),
+  "start": zod.coerce.date(),
+  "end": zod.coerce.date(),
+  "initialCapital": zod.number().gt(optimizeBacktestBodyInitialCapitalExclusiveMin)
+})
+
+export const OptimizeBacktestResponse = zod.object({
+  "mode": zod.enum(['paper']),
+  "timeframe": zod.string(),
+  "symbols": zod.array(zod.string()),
+  "start": zod.coerce.date(),
+  "end": zod.coerce.date(),
+  "initialCapital": zod.number(),
+  "candidatesTested": zod.number(),
+  "baseline": zod.object({
+  "mode": zod.enum(['paper']),
+  "timeframe": zod.string(),
+  "symbols": zod.array(zod.string()),
+  "start": zod.coerce.date(),
+  "end": zod.coerce.date(),
+  "barsLoaded": zod.number(),
+  "initialCapital": zod.number(),
+  "finalEquity": zod.number(),
+  "netPnl": zod.number(),
+  "returnPct": zod.number(),
+  "maxDrawdownPct": zod.number(),
+  "totalTrades": zod.number(),
+  "winningTrades": zod.number(),
+  "losingTrades": zod.number(),
+  "winRate": zod.number(),
+  "benchmarkReturnPct": zod.number(),
+  "trades": zod.array(zod.object({
+  "symbol": zod.string(),
+  "side": zod.enum(['long', 'short']),
+  "entryAt": zod.coerce.date(),
+  "exitAt": zod.coerce.date(),
+  "entryPrice": zod.number(),
+  "exitPrice": zod.number(),
+  "quantity": zod.number(),
+  "pnl": zod.number(),
+  "returnPct": zod.number(),
+  "exitReason": zod.string()
+})),
+  "ranAt": zod.coerce.date()
+}),
+  "best": zod.object({
+  "mode": zod.enum(['paper']),
+  "timeframe": zod.string(),
+  "symbols": zod.array(zod.string()),
+  "start": zod.coerce.date(),
+  "end": zod.coerce.date(),
+  "barsLoaded": zod.number(),
+  "initialCapital": zod.number(),
+  "finalEquity": zod.number(),
+  "netPnl": zod.number(),
+  "returnPct": zod.number(),
+  "maxDrawdownPct": zod.number(),
+  "totalTrades": zod.number(),
+  "winningTrades": zod.number(),
+  "losingTrades": zod.number(),
+  "winRate": zod.number(),
+  "benchmarkReturnPct": zod.number(),
+  "trades": zod.array(zod.object({
+  "symbol": zod.string(),
+  "side": zod.enum(['long', 'short']),
+  "entryAt": zod.coerce.date(),
+  "exitAt": zod.coerce.date(),
+  "entryPrice": zod.number(),
+  "exitPrice": zod.number(),
+  "quantity": zod.number(),
+  "pnl": zod.number(),
+  "returnPct": zod.number(),
+  "exitReason": zod.string()
+})),
+  "ranAt": zod.coerce.date()
+}),
+  "bestSettings": zod.object({
+  "entryZ": zod.number(),
+  "adxMax": zod.number(),
+  "minVolumeRatio": zod.number()
+}),
+  "leaderboard": zod.array(zod.object({
+  "settings": zod.object({
+  "entryZ": zod.number(),
+  "adxMax": zod.number(),
+  "minVolumeRatio": zod.number()
+}),
+  "score": zod.number(),
+  "returnPct": zod.number(),
+  "maxDrawdownPct": zod.number(),
+  "totalTrades": zod.number(),
+  "winRate": zod.number()
+})),
+  "ranAt": zod.coerce.date()
+})
+
+

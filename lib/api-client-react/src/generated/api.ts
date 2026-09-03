@@ -27,6 +27,8 @@ import type {
   ErrorResponse,
   FlattenResult,
   HealthStatus,
+  OptimizationResult,
+  OptimizeBacktestInput,
   RunStrategyInput,
   StrategyRunResult,
   SymbolSnapshot
@@ -584,5 +586,77 @@ export const useRunBacktest = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getRunBacktestMutationOptions(options));
+    }
+
+export const getOptimizeBacktestUrl = () => {
+
+
+
+
+  return `/api/agent/optimize`
+}
+
+/**
+ * Tests a bounded grid of strategy thresholds against Alpaca historical bars without submitting orders or changing live settings.
+ * @summary Optimize strategy thresholds on historical data
+ */
+export const optimizeBacktest = async (optimizeBacktestInput: OptimizeBacktestInput, options?: Parameters<typeof customFetch>[1]): Promise<OptimizationResult> => {
+
+  return customFetch<OptimizationResult>(getOptimizeBacktestUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(optimizeBacktestInput)
+  }
+);}
+
+
+
+
+
+export const getOptimizeBacktestMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof optimizeBacktest>>, TError,{data: BodyType<OptimizeBacktestInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof optimizeBacktest>>, TError,{data: BodyType<OptimizeBacktestInput>}, TContext> => {
+
+const mutationKey = ['optimizeBacktest'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof optimizeBacktest>>, {data: BodyType<OptimizeBacktestInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  optimizeBacktest(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type OptimizeBacktestMutationResult = NonNullable<Awaited<ReturnType<typeof optimizeBacktest>>>
+    export type OptimizeBacktestMutationBody = BodyType<OptimizeBacktestInput>
+    export type OptimizeBacktestMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Optimize strategy thresholds on historical data
+ */
+export const useOptimizeBacktest = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof optimizeBacktest>>, TError,{data: BodyType<OptimizeBacktestInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof optimizeBacktest>>,
+        TError,
+        {data: BodyType<OptimizeBacktestInput>},
+        TContext
+      > => {
+      return useMutation(getOptimizeBacktestMutationOptions(options));
     }
 

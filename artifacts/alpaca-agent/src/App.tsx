@@ -39,6 +39,7 @@ import {
   useGetAgentStatus,
   useGetMarketSnapshot,
   useHealthCheck,
+  useOptimizeBacktest,
   useRunBacktest,
   useRunStrategy,
 } from '@workspace/api-client-react';
@@ -46,6 +47,7 @@ import type {
   AgentDashboard,
   AgentStatus,
   BacktestResult,
+  OptimizationResult,
   GuardrailState,
   StrategyActivity,
   SymbolSnapshot,
@@ -636,33 +638,92 @@ function BacktestResultPanel({ result }: { result: BacktestResult }) {
   );
 }
 
+function OptimizationPanel({ result }: { result: OptimizationResult }) {
+  const improved = result.best.returnPct - result.baseline.returnPct;
+  return (
+    <div className="space-y-5" data-testid="panel-optimization-result">
+      <div className="panel">
+        <CardHeader eyebrow="Optimization / selected candidate" title="Best risk-adjusted settings" action={<span className="status-chip is-good"><span /> {result.candidatesTested} candidates tested</span>} />
+        <div className="optimization-summary">
+          <div><span>Entry threshold</span><strong>{result.bestSettings.entryZ.toFixed(2)}σ</strong></div>
+          <div><span>ADX ceiling</span><strong>{result.bestSettings.adxMax.toFixed(0)}</strong></div>
+          <div><span>Volume floor</span><strong>{result.bestSettings.minVolumeRatio.toFixed(2)}x</strong></div>
+          <div><span>Change vs baseline</span><strong className={improved >= 0 ? 'text-primary' : 'text-destructive'}>{pct(improved)}</strong></div>
+        </div>
+        <div className="optimization-note">Ranked by return minus half the maximum drawdown. These settings are a research result only; live guardrails were not changed.</div>
+      </div>
+      <div className="panel overflow-hidden">
+        <CardHeader eyebrow="Optimization / leaderboard" title="Top candidates" action={<span className="font-mono text-[10px] text-muted-foreground">baseline {pct(result.baseline.returnPct)}</span>} />
+        <div className="table-scroll">
+          <table className="data-table">
+            <thead><tr><th>#</th><th>Entry Z</th><th>ADX max</th><th>Volume</th><th>Score</th><th>Return</th><th>Drawdown</th><th>Trades</th></tr></thead>
+            <tbody>
+              {result.leaderboard.map((candidate, index) => (
+                <tr key={`${candidate.settings.entryZ}-${candidate.settings.adxMax}-${candidate.settings.minVolumeRatio}`}>
+                  <td className="font-mono text-xs">{index + 1}</td>
+                  <td className="font-mono text-xs">{candidate.settings.entryZ.toFixed(2)}σ</td>
+                  <td className="font-mono text-xs">{candidate.settings.adxMax.toFixed(0)}</td>
+                  <td className="font-mono text-xs">{candidate.settings.minVolumeRatio.toFixed(2)}x</td>
+                  <td className="font-mono text-xs">{pct(candidate.score)}</td>
+                  <td className={cx('font-mono text-xs', candidate.returnPct >= 0 ? 'text-primary' : 'text-destructive')}>{pct(candidate.returnPct)}</td>
+                  <td className="font-mono text-xs text-destructive">{pct(-candidate.maxDrawdownPct)}</td>
+                  <td className="font-mono text-xs">{candidate.totalTrades}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BacktestPage() {
   const today = dateInputValue(new Date());
   const defaultStart = dateInputValue(new Date(Date.now() - 180 * 24 * 60 * 60 * 1000));
   const run = useRunBacktest();
+  const optimize = useOptimizeBacktest();
   const [symbols, setSymbols] = useState('SPY, QQQ, IWM, AAPL');
   const [start, setStart] = useState(defaultStart);
   const [end, setEnd] = useState(today);
   const [initialCapital, setInitialCapital] = useState('100000');
   const [result, setResult] = useState<BacktestResult | null>(null);
+  const [optimization, setOptimization] = useState<OptimizationResult | null>(null);
   const [notice, setNotice] = useState('');
 
-  const submit = () => {
+  const getInput = () => {
     const selectedSymbols = symbols.split(',').map((symbol) => symbol.trim().toUpperCase()).filter(Boolean);
     const capital = Number(initialCapital);
     if (!selectedSymbols.length || !start || !end || !Number.isFinite(capital) || capital <= 0) {
       setNotice('Enter at least one symbol, a valid date range, and starting capital above zero.');
-      return;
+      return null;
     }
     if (start >= end) {
       setNotice('The start date must be before the end date.');
-      return;
+      return null;
     }
+    return { symbols: selectedSymbols, start, end, initialCapital: capital };
+  };
+
+  const submit = () => {
+    const input = getInput();
+    if (!input) return;
     setNotice('');
     setResult(null);
-    run.mutate({ data: { symbols: selectedSymbols, start, end, initialCapital: capital } }, {
+    run.mutate({ data: input }, {
       onSuccess: (backtest) => setResult(backtest),
       onError: () => setNotice('The Alpaca backtest could not be completed. Check the date range and API connection, then retry.'),
+    });
+  };
+
+  const submitOptimization = () => {
+    const input = getInput();
+    if (!input) return;
+    setNotice('');
+    setOptimization(null);
+    optimize.mutate({ data: input }, {
+      onSuccess: (optimized) => setOptimization(optimized),
+      onError: () => setNotice('The strategy optimization could not be completed. Check the date range and API connection, then retry.'),
     });
   };
 
@@ -679,10 +740,14 @@ function BacktestPage() {
         </div>
         <div className="status-footer backtest-form-footer">
           <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><LockKeyhole size={13} /> Simulation only · no order endpoint is used</div>
-          <button className="button button-primary" onClick={submit} disabled={run.isPending} data-testid="button-run-backtest">{run.isPending ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />} {run.isPending ? 'Loading bars…' : 'Run backtest'}</button>
+          <div className="flex gap-2">
+            <button className="button button-secondary" onClick={submitOptimization} disabled={run.isPending || optimize.isPending} data-testid="button-optimize-backtest">{optimize.isPending ? <RefreshCw size={14} className="animate-spin" /> : <TrendingUp size={14} />} {optimize.isPending ? 'Testing…' : 'Optimize'}</button>
+            <button className="button button-primary" onClick={submit} disabled={run.isPending || optimize.isPending} data-testid="button-run-backtest">{run.isPending ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />} {run.isPending ? 'Loading bars…' : 'Run backtest'}</button>
+          </div>
         </div>
       </div>
       {notice && <div className="notice-banner" data-testid="status-backtest-notice"><AlertTriangle size={14} /><span>{notice}</span></div>}
+      {optimization && <OptimizationPanel result={optimization} />}
       {result && <BacktestResultPanel result={result} />}
     </>
   );
