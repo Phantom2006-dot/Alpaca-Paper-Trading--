@@ -1,6 +1,6 @@
-# [Project name]
+# Alpaca Agent
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+An explainable AI-assisted Alpaca paper-trading agent that researches, scans, and executes only within visible paper-account guardrails.
 
 ## Run & Operate
 
@@ -26,11 +26,14 @@ _Populate as you build — short repo map plus pointers to the source-of-truth f
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- The product is an AI trading agent first, not a generic Alpaca administration console; Alpaca controls exist to give the agent a safe, explainable operating surface.
+- Paper-only execution is a hard product boundary. Backtests and optimization never call order endpoints, and live actions remain visibly gated as paper actions.
+- Strategy decisions should remain inspectable: asset scope, market data, thresholds, signals, blocks, and resulting paper actions must be visible to the operator.
+- Alpaca historical data and account state are accessed through the API server; browser code uses the generated OpenAPI client rather than handling credentials.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+The app gives operators an explainable AI agent cockpit: choose a tradable asset universe, tune and research the strategy, run paper-only scans, inspect account/position/order state, and review the decision trail. New capabilities should strengthen the agent's reasoning, safety, and explainability rather than turn the app into a bare brokerage dashboard.
 
 ## User preferences
 
