@@ -1,0 +1,1 @@
+- [Alpaca credential validation](alpaca-credential-validation.md) — distinguish populated paper secrets from a verified Alpaca account and fail closed on auth errors.

@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Alpaca Agent"
+description = "A paper-trading research cockpit that runs an explainable mean-reversion strategy with volume confirmation, ADX regime protection, hard invalidation, and trailing risk controls."
+version = "1.0.0"
+id = "artifacts/alpaca-agent"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24492
+
+[services.development]
+run = "pnpm --filter @workspace/alpaca-agent run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/alpaca-agent", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/alpaca-agent/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24492"
+BASE_PATH = "/"
