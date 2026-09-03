@@ -9,6 +9,7 @@ import {
 
 import {
   flattenPositions,
+  guardrails,
   getDashboard,
   getMarketSnapshot,
   getStatus,
@@ -62,6 +63,7 @@ router.post("/agent/backtest", async (req, res): Promise<void> => {
         parsed.data.end.toISOString().slice(0, 10),
         parsed.data.initialCapital,
         req.log,
+        parsed.data.settings ? { ...guardrails, ...parsed.data.settings } : guardrails,
       ),
     );
   } catch (error) {

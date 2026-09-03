@@ -13,6 +13,12 @@ export interface ErrorResponse {
   error: string;
 }
 
+export interface OptimizationSettings {
+  entryZ: number;
+  adxMax: number;
+  minVolumeRatio: number;
+}
+
 export interface BacktestInput {
   /**
      * @minItems 1
@@ -24,6 +30,7 @@ export interface BacktestInput {
   end: string;
   /** @exclusiveMinimum 0 */
   initialCapital: number;
+  settings?: OptimizationSettings;
 }
 
 export interface OptimizeBacktestInput {
@@ -37,12 +44,6 @@ export interface OptimizeBacktestInput {
   end: string;
   /** @exclusiveMinimum 0 */
   initialCapital: number;
-}
-
-export interface OptimizationSettings {
-  entryZ: number;
-  adxMax: number;
-  minVolumeRatio: number;
 }
 
 export interface OptimizationCandidate {

@@ -209,6 +209,8 @@ components:
         initialCapital:
           type: number
           exclusiveMinimum: 0
+        settings:
+          $ref: "#/components/schemas/OptimizationSettings"
       required: [symbols, start, end, initialCapital]
     OptimizeBacktestInput:
       type: object

@@ -225,7 +225,12 @@ export const RunBacktestBody = zod.object({
   "symbols": zod.array(zod.string().min(1)).min(1).max(runBacktestBodySymbolsMax),
   "start": zod.coerce.date(),
   "end": zod.coerce.date(),
-  "initialCapital": zod.number().gt(runBacktestBodyInitialCapitalExclusiveMin)
+  "initialCapital": zod.number().gt(runBacktestBodyInitialCapitalExclusiveMin),
+  "settings": zod.object({
+  "entryZ": zod.number(),
+  "adxMax": zod.number(),
+  "minVolumeRatio": zod.number()
+}).optional()
 })
 
 export const RunBacktestResponse = zod.object({

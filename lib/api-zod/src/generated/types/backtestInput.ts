@@ -5,6 +5,7 @@
  * Explainable Alpaca paper-trading agent API
  * OpenAPI spec version: 0.1.0
  */
+import type { OptimizationSettings } from './optimizationSettings';
 
 export interface BacktestInput {
   /**
@@ -17,4 +18,5 @@ export interface BacktestInput {
   end: Date;
   /** @exclusiveMinimum 0 */
   initialCapital: number;
+  settings?: OptimizationSettings;
 }
