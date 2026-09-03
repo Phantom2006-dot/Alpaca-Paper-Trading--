@@ -114,6 +114,37 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /agent/backtest:
+    post:
+      operationId: runBacktest
+      tags: [agent]
+      summary: Run a historical strategy backtest
+      description: Loads daily historical bars from Alpaca market data and simulates the strategy without submitting orders.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BacktestInput"
+      responses:
+        "200":
+          description: Backtest result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BacktestResult"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Alpaca market data unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     HealthStatus:
@@ -128,6 +159,101 @@ components:
         error:
           type: string
       required: [error]
+    BacktestInput:
+      type: object
+      properties:
+        symbols:
+          type: array
+          items:
+            type: string
+            minLength: 1
+          minItems: 1
+          maxItems: 8
+        start:
+          type: string
+          format: date
+        end:
+          type: string
+          format: date
+        initialCapital:
+          type: number
+          exclusiveMinimum: 0
+      required: [symbols, start, end, initialCapital]
+    BacktestTrade:
+      type: object
+      properties:
+        symbol:
+          type: string
+        side:
+          type: string
+          enum: [long, short]
+        entryAt:
+          type: string
+          format: date
+        exitAt:
+          type: string
+          format: date
+        entryPrice:
+          type: number
+        exitPrice:
+          type: number
+        quantity:
+          type: number
+        pnl:
+          type: number
+        returnPct:
+          type: number
+        exitReason:
+          type: string
+      required: [symbol, side, entryAt, exitAt, entryPrice, exitPrice, quantity, pnl, returnPct, exitReason]
+    BacktestResult:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [paper]
+        timeframe:
+          type: string
+        symbols:
+          type: array
+          items:
+            type: string
+        start:
+          type: string
+          format: date
+        end:
+          type: string
+          format: date
+        barsLoaded:
+          type: number
+        initialCapital:
+          type: number
+        finalEquity:
+          type: number
+        netPnl:
+          type: number
+        returnPct:
+          type: number
+        maxDrawdownPct:
+          type: number
+        totalTrades:
+          type: number
+        winningTrades:
+          type: number
+        losingTrades:
+          type: number
+        winRate:
+          type: number
+        benchmarkReturnPct:
+          type: number
+        trades:
+          type: array
+          items:
+            $ref: "#/components/schemas/BacktestTrade"
+        ranAt:
+          type: string
+          format: date-time
+      required: [mode, timeframe, symbols, start, end, barsLoaded, initialCapital, finalEquity, netPnl, returnPct, maxDrawdownPct, totalTrades, winningTrades, losingTrades, winRate, benchmarkReturnPct, trades, ranAt]
     AgentAccount:
       type: object
       properties:

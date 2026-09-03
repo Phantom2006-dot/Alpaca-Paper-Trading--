@@ -1,0 +1,1 @@
+- [OpenAPI code generation](openapi-codegen.md) — keep generated Zod schemas compatible with the workspace’s installed Zod major version.

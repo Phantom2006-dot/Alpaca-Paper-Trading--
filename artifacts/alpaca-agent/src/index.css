@@ -618,6 +618,15 @@
 .toggle-track:after { background: hsl(var(--muted-foreground)); content: ''; height: 10px; left: 2px; position: absolute; top: 2px; transition: transform .2s ease; width: 10px; }
 .dry-run-toggle input:checked + .toggle-track { background: hsl(var(--accent)); border-color: hsl(var(--accent)); }
 .dry-run-toggle input:checked + .toggle-track:after { background: hsl(var(--accent-foreground)); transform: translateX(12px); }
+.backtest-form { animation: rise-in .42s .05s ease both; }
+.backtest-fields { display: grid; gap: 16px; grid-template-columns: 1.4fr 1fr 1fr 1fr; padding: 2px 22px 22px; }
+.backtest-fields label { display: flex; flex-direction: column; gap: 7px; }
+.backtest-fields label > span { color: hsl(var(--muted-foreground)); font-family: var(--app-font-mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; }
+.backtest-fields input { background: hsl(var(--muted) / .45); border: 1px solid hsl(var(--border)); color: hsl(var(--foreground)); font-family: var(--app-font-mono); font-size: 11px; min-height: 37px; outline: 0; padding: 0 10px; }
+.backtest-fields input:focus { border-color: hsl(var(--primary) / .7); box-shadow: 0 0 0 2px hsl(var(--primary) / .1); }
+.backtest-fields label > small { color: hsl(var(--muted-foreground)); font-size: 9px; }
+.backtest-form-footer { border-top: 1px solid hsl(var(--border)); }
+.data-table td small { color: hsl(var(--muted-foreground)); display: block; font-family: var(--app-font-mono); font-size: 9px; margin-top: 4px; }
 
 @media (max-width: 1080px) {
   .page-wrap { padding-left: 28px; padding-right: 28px; }
@@ -645,6 +654,7 @@
   .metric-item:nth-child(3) { border-right: 0; }
   .metric-item:nth-child(-n+3) { border-bottom: 1px solid hsl(var(--border)); }
   .dashboard-grid, .logic-layout, .settings-layout, .explain-grid { grid-template-columns: 1fr; }
+  .backtest-fields { grid-template-columns: 1fr 1fr; }
   .guardrail-list { grid-template-columns: 1fr; }
   .flow-diagram { align-items: stretch; flex-direction: column; }
   .flow-line { height: 17px; margin-left: 25px; width: 1px; }
@@ -666,6 +676,7 @@
   .card-header { padding-left: 16px; padding-right: 16px; }
   .activity-list { padding-left: 16px; padding-right: 16px; }
   .formula-box { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .backtest-fields { grid-template-columns: 1fr; padding-left: 16px; padding-right: 16px; }
   .connection-state { font-size: 8px; }
   .settings-field-grid { grid-template-columns: 1fr; }
   .settings-field-grid > div + div { border-left: 0; border-top: 1px solid hsl(var(--border)); }

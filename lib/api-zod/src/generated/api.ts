@@ -210,3 +210,54 @@ export const GetMarketSnapshotResponse = zod.object({
 })
 
 
+/**
+ * Loads daily historical bars from Alpaca market data and simulates the strategy without submitting orders.
+ * @summary Run a historical strategy backtest
+ */
+
+export const runBacktestBodySymbolsMax = 8;
+
+export const runBacktestBodyInitialCapitalExclusiveMin = 0;
+
+
+
+export const RunBacktestBody = zod.object({
+  "symbols": zod.array(zod.string().min(1)).min(1).max(runBacktestBodySymbolsMax),
+  "start": zod.coerce.date(),
+  "end": zod.coerce.date(),
+  "initialCapital": zod.number().gt(runBacktestBodyInitialCapitalExclusiveMin)
+})
+
+export const RunBacktestResponse = zod.object({
+  "mode": zod.enum(['paper']),
+  "timeframe": zod.string(),
+  "symbols": zod.array(zod.string()),
+  "start": zod.coerce.date(),
+  "end": zod.coerce.date(),
+  "barsLoaded": zod.number(),
+  "initialCapital": zod.number(),
+  "finalEquity": zod.number(),
+  "netPnl": zod.number(),
+  "returnPct": zod.number(),
+  "maxDrawdownPct": zod.number(),
+  "totalTrades": zod.number(),
+  "winningTrades": zod.number(),
+  "losingTrades": zod.number(),
+  "winRate": zod.number(),
+  "benchmarkReturnPct": zod.number(),
+  "trades": zod.array(zod.object({
+  "symbol": zod.string(),
+  "side": zod.enum(['long', 'short']),
+  "entryAt": zod.coerce.date(),
+  "exitAt": zod.coerce.date(),
+  "entryPrice": zod.number(),
+  "exitPrice": zod.number(),
+  "quantity": zod.number(),
+  "pnl": zod.number(),
+  "returnPct": zod.number(),
+  "exitReason": zod.string()
+})),
+  "ranAt": zod.coerce.date()
+})
+
+

@@ -39,11 +39,13 @@ import {
   useGetAgentStatus,
   useGetMarketSnapshot,
   useHealthCheck,
+  useRunBacktest,
   useRunStrategy,
 } from '@workspace/api-client-react';
 import type {
   AgentDashboard,
   AgentStatus,
+  BacktestResult,
   GuardrailState,
   StrategyActivity,
   SymbolSnapshot,
@@ -55,6 +57,7 @@ const queryClient = new QueryClient();
 const navItems = [
   { href: '/', label: 'Control room', short: 'CTRL', icon: LayoutDashboard },
   { href: '/strategy', label: 'Strategy logic', short: 'LOGIC', icon: BrainCircuit },
+  { href: '/backtest', label: 'Backtest', short: 'TEST', icon: Database },
   { href: '/activity', label: 'Activity log', short: 'AUDIT', icon: ListChecks },
   { href: '/settings', label: 'Settings', short: 'SETUP', icon: SlidersHorizontal },
 ];
@@ -91,6 +94,10 @@ function money(value = 0, currency = 'USD') {
 
 function pct(value = 0, digits = 2) {
   return `${value >= 0 ? '+' : ''}${value.toFixed(digits)}%`;
+}
+
+function dateInputValue(date: Date) {
+  return date.toISOString().slice(0, 10);
 }
 
 function z(value = 0) {
@@ -574,6 +581,113 @@ function StrategyContent({ guardrails, symbols }: { guardrails: GuardrailState; 
   );
 }
 
+function BacktestResultPanel({ result }: { result: BacktestResult }) {
+  const metrics = [
+    { label: 'Final equity', value: money(result.finalEquity) },
+    { label: 'Net P&L', value: money(result.netPnl), tone: result.netPnl >= 0 ? 'text-primary' : 'text-destructive' },
+    { label: 'Strategy return', value: pct(result.returnPct), tone: result.returnPct >= 0 ? 'text-primary' : 'text-destructive' },
+    { label: 'Max drawdown', value: pct(-result.maxDrawdownPct), tone: 'text-destructive' },
+  ];
+  return (
+    <div className="space-y-5" data-testid="panel-backtest-result">
+      <div className="account-strip">
+        {metrics.map((metric) => (
+          <div className="account-cell" key={metric.label}>
+            <div className="eyebrow">{metric.label}</div>
+            <div className={cx('account-value', metric.tone)}>{metric.value}</div>
+          </div>
+        ))}
+      </div>
+      <div className="panel">
+        <CardHeader eyebrow="02 / result summary" title="Historical run complete" action={<span className="status-chip is-good"><span /> Alpaca · {result.timeframe}</span>} />
+        <div className="detail-stat-grid">
+          <div><span>Bars loaded</span><strong>{result.barsLoaded}</strong></div>
+          <div><span>Trades</span><strong>{result.totalTrades}</strong></div>
+          <div><span>Win rate</span><strong>{result.winRate.toFixed(1)}%</strong></div>
+          <div><span>Buy & hold</span><strong>{pct(result.benchmarkReturnPct)}</strong></div>
+          <div><span>Range</span><strong>{result.start} → {result.end}</strong></div>
+          <div><span>Symbols</span><strong>{result.symbols.join(', ')}</strong></div>
+        </div>
+      </div>
+      <div className="panel overflow-hidden">
+        <CardHeader eyebrow="03 / execution ledger" title="Simulated trades" action={<span className="font-mono text-[10px] text-muted-foreground">{result.winningTrades} wins · {result.losingTrades} losses</span>} />
+        {result.trades.length === 0 ? <EmptyState title="No trades in this range" description="The guardrails did not produce a completed entry and exit for the selected data." /> : (
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead><tr><th>Symbol</th><th>Side</th><th>Entry</th><th>Exit</th><th>Qty</th><th>P&L</th><th>Reason</th></tr></thead>
+              <tbody>
+                {result.trades.map((trade, index) => (
+                  <tr key={`${trade.symbol}-${trade.entryAt}-${index}`}>
+                    <td><strong>{trade.symbol}</strong></td>
+                    <td className="text-xs uppercase">{trade.side}</td>
+                    <td className="font-mono text-xs">${trade.entryPrice.toFixed(2)}<small>{trade.entryAt}</small></td>
+                    <td className="font-mono text-xs">${trade.exitPrice.toFixed(2)}<small>{trade.exitAt}</small></td>
+                    <td className="font-mono text-xs">{trade.quantity}</td>
+                    <td className={cx('font-mono text-xs', trade.pnl >= 0 ? 'text-primary' : 'text-destructive')}>{money(trade.pnl)}<small>{pct(trade.returnPct)}</small></td>
+                    <td className="text-xs text-muted-foreground">{trade.exitReason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BacktestPage() {
+  const today = dateInputValue(new Date());
+  const defaultStart = dateInputValue(new Date(Date.now() - 180 * 24 * 60 * 60 * 1000));
+  const run = useRunBacktest();
+  const [symbols, setSymbols] = useState('SPY, QQQ, IWM, AAPL');
+  const [start, setStart] = useState(defaultStart);
+  const [end, setEnd] = useState(today);
+  const [initialCapital, setInitialCapital] = useState('100000');
+  const [result, setResult] = useState<BacktestResult | null>(null);
+  const [notice, setNotice] = useState('');
+
+  const submit = () => {
+    const selectedSymbols = symbols.split(',').map((symbol) => symbol.trim().toUpperCase()).filter(Boolean);
+    const capital = Number(initialCapital);
+    if (!selectedSymbols.length || !start || !end || !Number.isFinite(capital) || capital <= 0) {
+      setNotice('Enter at least one symbol, a valid date range, and starting capital above zero.');
+      return;
+    }
+    if (start >= end) {
+      setNotice('The start date must be before the end date.');
+      return;
+    }
+    setNotice('');
+    setResult(null);
+    run.mutate({ data: { symbols: selectedSymbols, start, end, initialCapital: capital } }, {
+      onSuccess: (backtest) => setResult(backtest),
+      onError: () => setNotice('The Alpaca backtest could not be completed. Check the date range and API connection, then retry.'),
+    });
+  };
+
+  return (
+    <>
+      <PageIntro eyebrow="Research / historical replay" title="Test the decision path." description="Replay the strategy against Alpaca daily bars. This is a read-only simulation: no orders are submitted." action={<Link href="/" className="button button-secondary" data-testid="link-back-control-room"><LayoutDashboard size={14} /> Control room</Link>} />
+      <div className="panel backtest-form" data-testid="panel-backtest-form">
+        <CardHeader eyebrow="01 / test parameters" title="Choose a replay window" action={<div className="mode-pill is-paper"><span className="mode-pill-dot" /> Alpaca IEX data</div>} />
+        <div className="backtest-fields">
+          <label><span>Symbols</span><input value={symbols} onChange={(event) => setSymbols(event.target.value)} placeholder="SPY, QQQ, AAPL" data-testid="input-backtest-symbols" /><small>Comma-separated · maximum 8</small></label>
+          <label><span>Initial capital</span><input type="number" min="1" step="1000" value={initialCapital} onChange={(event) => setInitialCapital(event.target.value)} data-testid="input-backtest-capital" /><small>Each symbol receives an equal allocation</small></label>
+          <label><span>Start date</span><input type="date" value={start} max={end} onChange={(event) => setStart(event.target.value)} data-testid="input-backtest-start" /></label>
+          <label><span>End date</span><input type="date" value={end} min={start} onChange={(event) => setEnd(event.target.value)} data-testid="input-backtest-end" /></label>
+        </div>
+        <div className="status-footer backtest-form-footer">
+          <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><LockKeyhole size={13} /> Simulation only · no order endpoint is used</div>
+          <button className="button button-primary" onClick={submit} disabled={run.isPending} data-testid="button-run-backtest">{run.isPending ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />} {run.isPending ? 'Loading bars…' : 'Run backtest'}</button>
+        </div>
+      </div>
+      {notice && <div className="notice-banner" data-testid="status-backtest-notice"><AlertTriangle size={14} /><span>{notice}</span></div>}
+      {result && <BacktestResultPanel result={result} />}
+    </>
+  );
+}
+
 function ActivityPage() {
   const dashboardQuery = useGetAgentDashboard({ query: { queryKey: getGetAgentDashboardQueryKey(), refetchInterval: 30000 } });
   const [filter, setFilter] = useState('all');
@@ -631,7 +745,7 @@ function NotFound() {
 }
 
 function Router() {
-  return <ErrorBoundary><Shell><Switch><Route path="/" component={DashboardPage} /><Route path="/strategy" component={StrategyPage} /><Route path="/activity" component={ActivityPage} /><Route path="/settings" component={SettingsPage} /><Route component={NotFound} /></Switch></Shell></ErrorBoundary>;
+  return <ErrorBoundary><Shell><Switch><Route path="/" component={DashboardPage} /><Route path="/strategy" component={StrategyPage} /><Route path="/backtest" component={BacktestPage} /><Route path="/activity" component={ActivityPage} /><Route path="/settings" component={SettingsPage} /><Route component={NotFound} /></Switch></Shell></ErrorBoundary>;
 }
 
 function App() {

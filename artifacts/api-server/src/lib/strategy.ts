@@ -8,9 +8,11 @@ import {
   GetMarketSnapshotResponse,
   RunStrategyResponse,
   FlattenAgentPositionsResponse,
+  RunBacktestResponse,
 } from "@workspace/api-zod";
 
 type Bar = {
+  timestamp?: string;
   close: number;
   high: number;
   low: number;
@@ -55,6 +57,7 @@ let blockedToday = 0;
 let activities: Activity[] = [];
 const demoPositions = new Map<string, Position>();
 const trailingExtremes = new Map<string, number>();
+const DEFAULT_BACKTEST_DAYS = 180;
 
 function hasCredentials(): boolean {
   return Boolean(
@@ -197,6 +200,47 @@ async function fetchBars(symbol: string): Promise<Bar[]> {
   }));
 }
 
+async function fetchHistoricalBars(
+  symbol: string,
+  start: string,
+  end: string,
+): Promise<Bar[]> {
+  if (!hasCredentials()) {
+    throw new Error("Alpaca credentials are required for a historical backtest.");
+  }
+  const query = new URLSearchParams({
+    timeframe: "1Day",
+    start,
+    end,
+    limit: "1000",
+    feed: "iex",
+    sort: "asc",
+  });
+  const response = await fetch(
+    `${MARKET_DATA_URL}/stocks/${encodeURIComponent(symbol)}/bars?${query.toString()}`,
+    {
+      headers: {
+        "APCA-API-KEY-ID": process.env["ALPACA_API_KEY"] ?? "",
+        "APCA-API-SECRET-KEY": process.env["ALPACA_API_SECRET"] ?? "",
+      },
+    },
+  );
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`Market data ${response.status}: ${message.slice(0, 300)}`);
+  }
+  const payload = (await response.json()) as {
+    bars?: Array<{ t: string; c: number; h: number; l: number; v: number }>;
+  };
+  return (payload.bars ?? []).map((bar) => ({
+    timestamp: bar.t,
+    close: toNumber(bar.c),
+    high: toNumber(bar.h),
+    low: toNumber(bar.l),
+    volume: toNumber(bar.v),
+  }));
+}
+
 async function fetchAccount(): Promise<{
   equity: number;
   cash: number;
@@ -264,6 +308,7 @@ function snapshotFromBars(
   symbol: string,
   bars: Bar[],
   position: Position | undefined,
+  extremes = trailingExtremes,
 ): Snapshot {
   const closes = bars.map((bar) => bar.close);
   const window = closes.slice(-20);
@@ -277,14 +322,14 @@ function snapshotFromBars(
   const volumeRatio = avgVolume ? volume / avgVolume : 0;
   const adx = calculateAdx(bars);
   const side = position?.side ?? "flat";
-  const extreme = trailingExtremes.get(symbol);
+  const extreme = extremes.get(symbol);
   const nextExtreme =
     side === "long"
       ? Math.max(extreme ?? price, price)
       : side === "short"
         ? Math.min(extreme ?? price, price)
         : price;
-  trailingExtremes.set(symbol, nextExtreme);
+  extremes.set(symbol, nextExtreme);
 
   let signal: Snapshot["signal"] = "hold";
   let tradeBlockedReason: string | null = null;
@@ -577,4 +622,252 @@ export async function getMarketSnapshot(symbol: string) {
   const positions = await fetchPositions();
   const bars = await fetchBars(normalized);
   return snapshotFromBars(normalized, bars, positionFor(positions, normalized));
+}
+
+type BacktestPosition = {
+  side: "long" | "short";
+  quantity: number;
+  entryPrice: number;
+  entryAt: string;
+};
+
+function markToMarket(capital: number, position: BacktestPosition | null, price: number) {
+  if (!position) return capital;
+  const unrealized =
+    position.side === "long"
+      ? (price - position.entryPrice) * position.quantity
+      : (position.entryPrice - price) * position.quantity;
+  return capital + unrealized;
+}
+
+export async function runBacktest(
+  symbols: string[],
+  start: string,
+  end: string,
+  initialCapital: number,
+  log: Logger,
+) {
+  if (!hasCredentials()) {
+    throw new Error("Alpaca credentials are required for a historical backtest.");
+  }
+
+  const selectedSymbols = [
+    ...new Set(
+      symbols
+        .map((symbol) => symbol.trim().toUpperCase())
+        .filter(Boolean),
+    ),
+  ].slice(0, 8);
+  if (!selectedSymbols.length) {
+    throw new Error("At least one symbol is required for a backtest.");
+  }
+
+  const historical = await Promise.all(
+    selectedSymbols.map(async (symbol) => ({
+      symbol,
+      bars: await fetchHistoricalBars(symbol, start, end),
+    })),
+  );
+  const usable = historical.filter(({ bars }) => bars.length >= 22);
+  if (!usable.length) {
+    throw new Error("Alpaca returned fewer than 22 daily bars for the selected range.");
+  }
+
+  const allocation = initialCapital / usable.length;
+  const states = new Map<
+    string,
+    {
+      capital: number;
+      position: BacktestPosition | null;
+      extremes: Map<string, number>;
+      firstPrice: number;
+      lastPrice: number;
+    }
+  >();
+  const trades: Array<{
+    symbol: string;
+    side: "long" | "short";
+    entryAt: string;
+    exitAt: string;
+    entryPrice: number;
+    exitPrice: number;
+    quantity: number;
+    pnl: number;
+    returnPct: number;
+    exitReason: string;
+  }> = [];
+  let barsLoaded = 0;
+  let signals = 0;
+  const equityCurve: number[] = [initialCapital];
+
+  for (const { symbol, bars } of usable) {
+    states.set(symbol, {
+      capital: allocation,
+      position: null,
+      extremes: new Map(),
+      firstPrice: bars[0].close,
+      lastPrice: bars.at(-1)?.close ?? bars[0].close,
+    });
+    barsLoaded += bars.length;
+  }
+
+  const maxBars = Math.max(...usable.map(({ bars }) => bars.length));
+  for (let index = 21; index < maxBars; index += 1) {
+    for (const { symbol, bars } of usable) {
+      const state = states.get(symbol);
+      if (!state || !bars[index]) continue;
+      const history = bars.slice(0, index + 1);
+      const price = bars[index].close;
+      const snapshot = snapshotFromBars(
+        symbol,
+        history,
+        state.position
+          ? {
+              symbol,
+              qty: state.position.quantity,
+              side: state.position.side,
+              avgEntryPrice: state.position.entryPrice,
+              currentPrice: price,
+              unrealizedPnl:
+                state.position.side === "long"
+                  ? (price - state.position.entryPrice) * state.position.quantity
+                  : (state.position.entryPrice - price) * state.position.quantity,
+            }
+          : undefined,
+        state.extremes,
+      );
+      state.lastPrice = price;
+      const barAt = (bars[index].timestamp ?? end).slice(0, 10);
+
+      if (
+        state.position &&
+        (snapshot.signal === "exit" || snapshot.signal === "invalidation")
+      ) {
+        const position = state.position;
+        const pnl =
+          position.side === "long"
+            ? (price - position.entryPrice) * position.quantity
+            : (position.entryPrice - price) * position.quantity;
+        const notional = position.entryPrice * position.quantity;
+        state.capital += pnl;
+        trades.push({
+          symbol,
+          side: position.side,
+          entryAt: position.entryAt,
+          exitAt: barAt,
+          entryPrice: position.entryPrice,
+          exitPrice: price,
+          quantity: position.quantity,
+          pnl,
+          returnPct: notional ? (pnl / notional) * 100 : 0,
+          exitReason: snapshot.signal === "exit" ? "equilibrium exit" : "risk invalidation",
+        });
+        state.position = null;
+        state.extremes.clear();
+      } else if (
+        !state.position &&
+        (snapshot.signal === "long_entry" || snapshot.signal === "short_entry")
+      ) {
+        const quantity = Math.floor(
+          (state.capital * (guardrails.maxPositionPct / 100)) / price,
+        );
+        if (quantity > 0) {
+          state.position = {
+            side: snapshot.signal === "long_entry" ? "long" : "short",
+            quantity,
+            entryPrice: price,
+            entryAt: barAt,
+          };
+          signals += 1;
+        }
+      }
+    }
+
+    const equity = [...states.values()].reduce((sum, state) => {
+      return sum + markToMarket(state.capital, state.position, state.lastPrice);
+    }, 0);
+    equityCurve.push(equity);
+  }
+
+  for (const { symbol, bars } of usable) {
+    const state = states.get(symbol);
+    const finalBar = bars.at(-1);
+    if (!state || !state.position || !finalBar) continue;
+    const position = state.position;
+    const pnl =
+      position.side === "long"
+        ? (finalBar.close - position.entryPrice) * position.quantity
+        : (position.entryPrice - finalBar.close) * position.quantity;
+    const notional = position.entryPrice * position.quantity;
+    state.capital += pnl;
+    trades.push({
+      symbol,
+      side: position.side,
+      entryAt: position.entryAt,
+      exitAt: (finalBar.timestamp ?? end).slice(0, 10),
+      entryPrice: position.entryPrice,
+      exitPrice: finalBar.close,
+      quantity: position.quantity,
+      pnl,
+      returnPct: notional ? (pnl / notional) * 100 : 0,
+      exitReason: "end of test",
+    });
+    state.position = null;
+  }
+
+  const finalEquity = [...states.values()].reduce(
+    (sum, state) => sum + state.capital,
+    0,
+  );
+  let peak = equityCurve[0] ?? initialCapital;
+  let maxDrawdownPct = 0;
+  for (const equity of equityCurve) {
+    peak = Math.max(peak, equity);
+    if (peak > 0) {
+      maxDrawdownPct = Math.max(maxDrawdownPct, ((peak - equity) / peak) * 100);
+    }
+  }
+  const winningTrades = trades.filter((trade) => trade.pnl > 0).length;
+  const losingTrades = trades.filter((trade) => trade.pnl <= 0).length;
+  const benchmarkReturnPct =
+    usable.reduce(
+      (sum, { bars }) =>
+        sum +
+        (((bars.at(-1)?.close ?? 0) / (bars[0]?.close ?? 1) - 1) * 100) /
+          usable.length,
+      0,
+    );
+  const ranAt = new Date().toISOString();
+
+  log.info(
+    {
+      symbols: usable.map(({ symbol }) => symbol),
+      barsLoaded,
+      trades: trades.length,
+      signals,
+      returnPct: ((finalEquity - initialCapital) / initialCapital) * 100,
+    },
+    "Historical backtest completed",
+  );
+
+  return RunBacktestResponse.parse({
+    mode: "paper",
+    timeframe: "1Day",
+    symbols: usable.map(({ symbol }) => symbol),
+    start,
+    end,
+    barsLoaded,
+    initialCapital,
+    finalEquity,
+    netPnl: finalEquity - initialCapital,
+    returnPct: ((finalEquity - initialCapital) / initialCapital) * 100,
+    maxDrawdownPct,
+    totalTrades: trades.length,
+    winningTrades,
+    losingTrades,
+    winRate: trades.length ? (winningTrades / trades.length) * 100 : 0,
+    benchmarkReturnPct,
+    trades: trades.slice(-100),
+    ranAt,
+  });
 }

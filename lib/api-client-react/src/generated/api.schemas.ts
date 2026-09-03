@@ -13,6 +13,68 @@ export interface ErrorResponse {
   error: string;
 }
 
+export interface BacktestInput {
+  /**
+     * @minItems 1
+     * @maxItems 8
+     * @items.minLength 1
+     */
+  symbols: string[];
+  start: string;
+  end: string;
+  /** @exclusiveMinimum 0 */
+  initialCapital: number;
+}
+
+export type BacktestTradeSide = typeof BacktestTradeSide[keyof typeof BacktestTradeSide];
+
+
+export const BacktestTradeSide = {
+  long: 'long',
+  short: 'short',
+} as const;
+
+export interface BacktestTrade {
+  symbol: string;
+  side: BacktestTradeSide;
+  entryAt: string;
+  exitAt: string;
+  entryPrice: number;
+  exitPrice: number;
+  quantity: number;
+  pnl: number;
+  returnPct: number;
+  exitReason: string;
+}
+
+export type BacktestResultMode = typeof BacktestResultMode[keyof typeof BacktestResultMode];
+
+
+export const BacktestResultMode = {
+  paper: 'paper',
+} as const;
+
+export interface BacktestResult {
+  mode: BacktestResultMode;
+  timeframe: string;
+  symbols: string[];
+  start: string;
+  end: string;
+  barsLoaded: number;
+  initialCapital: number;
+  finalEquity: number;
+  netPnl: number;
+  returnPct: number;
+  maxDrawdownPct: number;
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  winRate: number;
+  benchmarkReturnPct: number;
+  trades: BacktestTrade[];
+  ranAt: string;
+}
+
 export interface AgentAccount {
   equity: number;
   cash: number;

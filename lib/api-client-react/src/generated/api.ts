@@ -22,6 +22,8 @@ import type {
 import type {
   AgentDashboard,
   AgentStatus,
+  BacktestInput,
+  BacktestResult,
   ErrorResponse,
   FlattenResult,
   HealthStatus,
@@ -511,4 +513,76 @@ export function useGetMarketSnapshot<TData = Awaited<ReturnType<typeof getMarket
 
 
 
+
+export const getRunBacktestUrl = () => {
+
+
+
+
+  return `/api/agent/backtest`
+}
+
+/**
+ * Loads daily historical bars from Alpaca market data and simulates the strategy without submitting orders.
+ * @summary Run a historical strategy backtest
+ */
+export const runBacktest = async (backtestInput: BacktestInput, options?: Parameters<typeof customFetch>[1]): Promise<BacktestResult> => {
+
+  return customFetch<BacktestResult>(getRunBacktestUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(backtestInput)
+  }
+);}
+
+
+
+
+
+export const getRunBacktestMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runBacktest>>, TError,{data: BodyType<BacktestInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof runBacktest>>, TError,{data: BodyType<BacktestInput>}, TContext> => {
+
+const mutationKey = ['runBacktest'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof runBacktest>>, {data: BodyType<BacktestInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  runBacktest(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RunBacktestMutationResult = NonNullable<Awaited<ReturnType<typeof runBacktest>>>
+    export type RunBacktestMutationBody = BodyType<BacktestInput>
+    export type RunBacktestMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Run a historical strategy backtest
+ */
+export const useRunBacktest = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runBacktest>>, TError,{data: BodyType<BacktestInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof runBacktest>>,
+        TError,
+        {data: BodyType<BacktestInput>},
+        TContext
+      > => {
+      return useMutation(getRunBacktestMutationOptions(options));
+    }
 
