@@ -10,6 +10,8 @@ import {
   FlattenAgentPositionsResponse,
   RunBacktestResponse,
   OptimizeBacktestResponse,
+  GetAgentAssetsResponse,
+  GetAgentAccountResponse,
 } from "@workspace/api-zod";
 
 type Bar = {
@@ -20,12 +22,16 @@ type Bar = {
   volume: number;
 };
 
+export type Timeframe = "1Min" | "5Min" | "15Min" | "1Hour" | "1Day";
+export type DataFeed = "iex" | "sip" | "delayed_sip";
+
 type Position = {
   symbol: string;
   qty: number;
   side: "long" | "short";
   avgEntryPrice: number;
   currentPrice: number;
+  marketValue: number;
   unrealizedPnl: number;
 };
 
@@ -150,6 +156,25 @@ function demoBars(symbol: string): Bar[] {
   });
 }
 
+const demoAssets = [
+  ["SPY", "SPDR S&P 500 ETF Trust", "ARCA"],
+  ["QQQ", "Invesco QQQ Trust", "NASDAQ"],
+  ["IWM", "iShares Russell 2000 ETF", "ARCA"],
+  ["AAPL", "Apple Inc.", "NASDAQ"],
+  ["MSFT", "Microsoft Corporation", "NASDAQ"],
+  ["NVDA", "NVIDIA Corporation", "NASDAQ"],
+  ["TSLA", "Tesla, Inc.", "NASDAQ"],
+  ["AMZN", "Amazon.com, Inc.", "NASDAQ"],
+].map(([symbol, name, exchange]) => ({
+  symbol,
+  name,
+  exchange,
+  assetClass: "us_equity",
+  status: "active",
+  tradable: true,
+  fractionable: true,
+}));
+
 async function alpacaRequest<T>(
   path: string,
   init: RequestInit = {},
@@ -170,12 +195,16 @@ async function alpacaRequest<T>(
   return (await response.json()) as T;
 }
 
-async function fetchBars(symbol: string): Promise<Bar[]> {
+async function fetchBars(
+  symbol: string,
+  timeframe: Timeframe = "1Day",
+  feed: DataFeed = "iex",
+): Promise<Bar[]> {
   if (!hasCredentials()) return demoBars(symbol);
   const query = new URLSearchParams({
-    timeframe: "1Day",
+    timeframe,
     limit: "60",
-    feed: "iex",
+    feed,
     sort: "asc",
   });
   const response = await fetch(
@@ -206,16 +235,18 @@ async function fetchHistoricalBars(
   symbol: string,
   start: string,
   end: string,
+  timeframe: Timeframe = "1Day",
+  feed: DataFeed = "iex",
 ): Promise<Bar[]> {
   if (!hasCredentials()) {
     throw new Error("Alpaca credentials are required for a historical backtest.");
   }
   const query = new URLSearchParams({
-    timeframe: "1Day",
+    timeframe,
     start,
     end,
     limit: "1000",
-    feed: "iex",
+    feed,
     sort: "asc",
   });
   const response = await fetch(
@@ -289,6 +320,7 @@ async function fetchPositions(): Promise<Position[]> {
       side: string;
       avg_entry_price: string;
       current_price: string;
+      market_value?: string;
       unrealized_pl: string;
     }>
   >("/v2/positions");
@@ -298,8 +330,93 @@ async function fetchPositions(): Promise<Position[]> {
     side: position.side === "short" ? "short" : "long",
     avgEntryPrice: toNumber(position.avg_entry_price),
     currentPrice: toNumber(position.current_price),
+    marketValue: Math.abs(toNumber(position.market_value, toNumber(position.qty) * toNumber(position.current_price))),
     unrealizedPnl: toNumber(position.unrealized_pl),
   }));
+}
+
+export async function getAgentAssets(search?: string) {
+  const query = search?.trim().toLowerCase();
+  if (!hasCredentials()) {
+    return GetAgentAssetsResponse.parse(
+      demoAssets.filter((asset) => !query || `${asset.symbol} ${asset.name}`.toLowerCase().includes(query)),
+    );
+  }
+  const assets = await alpacaRequest<
+    Array<{
+      symbol: string;
+      name: string;
+      exchange: string;
+      class: string;
+      status: string;
+      tradable: boolean;
+      fractionable: boolean;
+    }>
+  >("/v2/assets?status=active&tradable=true&asset_class=us_equity");
+  return GetAgentAssetsResponse.parse(
+    assets
+      .filter((asset) => !query || `${asset.symbol} ${asset.name}`.toLowerCase().includes(query))
+      .slice(0, 100)
+      .map((asset) => ({
+        symbol: asset.symbol,
+        name: asset.name,
+        exchange: asset.exchange,
+        assetClass: asset.class,
+        status: asset.status,
+        tradable: asset.tradable,
+        fractionable: asset.fractionable,
+      })),
+  );
+}
+
+async function fetchOrders() {
+  if (!hasCredentials()) return [];
+  const orders = await alpacaRequest<
+    Array<{
+      id: string;
+      symbol: string;
+      side: string;
+      type: string;
+      status: string;
+      qty: string;
+      filled_qty: string;
+      submitted_at: string;
+      filled_at?: string | null;
+    }>
+  >("/v2/orders?status=all&limit=50&direction=desc");
+  return orders.map((order) => ({
+    id: order.id,
+    symbol: order.symbol,
+    side: order.side,
+    type: order.type,
+    status: order.status,
+    qty: toNumber(order.qty),
+    filledQty: toNumber(order.filled_qty),
+    submittedAt: order.submitted_at,
+    filledAt: order.filled_at ?? null,
+  }));
+}
+
+export async function getAgentAccount() {
+  const [account, positions, orders] = await Promise.all([
+    fetchAccount(),
+    fetchPositions(),
+    fetchOrders(),
+  ]);
+  return GetAgentAccountResponse.parse({
+    account,
+    positions: positions.map((position) => ({
+      symbol: position.symbol,
+      qty: position.qty,
+      side: position.side,
+      avgEntryPrice: position.avgEntryPrice,
+      currentPrice: position.currentPrice,
+      marketValue: position.marketValue,
+      unrealizedPnl: position.unrealizedPnl,
+    })),
+    orders,
+    fetchedAt: new Date().toISOString(),
+  });
 }
 
 function positionFor(positions: Position[], symbol: string): Position | undefined {
@@ -395,8 +512,9 @@ async function submitEntry(
   snapshot: Snapshot,
   equity: number,
   dryRun: boolean,
+  rules: StrategyRules = guardrails,
 ): Promise<Activity> {
-  const qty = Math.max(1, Math.floor((equity * (guardrails.maxPositionPct / 100)) / snapshot.price));
+  const qty = Math.max(1, Math.floor((equity * (rules.maxPositionPct / 100)) / snapshot.price));
   const side = snapshot.signal === "long_entry" ? "buy" : "sell";
   let orderId: string | null = null;
   let status: Activity["status"] = "simulated";
@@ -420,6 +538,7 @@ async function submitEntry(
       side: side === "buy" ? "long" : "short",
       avgEntryPrice: snapshot.price,
       currentPrice: snapshot.price,
+      marketValue: snapshot.price * qty,
       unrealizedPnl: 0,
     });
   }
@@ -428,7 +547,7 @@ async function submitEntry(
     action: side === "buy" ? "LONG ENTRY" : "SHORT ENTRY",
     symbol: snapshot.symbol,
     zScore: snapshot.zScore,
-    reason: `Z-score ${snapshot.zScore.toFixed(2)} crossed the ${guardrails.entryZ.toFixed(1)}σ entry threshold; ADX and volume confirmed.`,
+    reason: `Z-score ${snapshot.zScore.toFixed(2)} crossed the ${rules.entryZ.toFixed(1)}σ entry threshold; ADX and volume confirmed.`,
     orderId,
     status,
   });
@@ -515,13 +634,14 @@ export async function runStrategy(
   symbols: string[],
   dryRun: boolean,
   log: Logger,
+  rules: StrategyRules = guardrails,
 ) {
   const selectedSymbols = [...new Set(symbols.map((symbol) => symbol.trim().toUpperCase()).filter(Boolean))].slice(0, 8);
   const [account, positions] = await Promise.all([fetchAccount(), fetchPositions()]);
   const snapshots = await Promise.all(
     selectedSymbols.map(async (symbol) => {
       const bars = await fetchBars(symbol);
-      return snapshotFromBars(symbol, bars, positionFor(positions, symbol));
+      return snapshotFromBars(symbol, bars, positionFor(positions, symbol), trailingExtremes, rules);
     }),
   );
   const actions: Activity[] = [];
@@ -541,7 +661,7 @@ export async function runStrategy(
           }),
         );
       } else {
-        actions.push(await submitEntry(snapshot, account.equity, dryRun));
+        actions.push(await submitEntry(snapshot, account.equity, dryRun, rules));
       }
     } else if (snapshot.signal === "exit") {
       if (position) {
@@ -621,7 +741,7 @@ export async function flattenPositions(log: Logger) {
 
 export async function getMarketSnapshot(symbol: string) {
   const normalized = symbol.trim().toUpperCase();
-  if (!DEFAULT_SYMBOLS.includes(normalized)) return null;
+  if (!normalized) return null;
   const positions = await fetchPositions();
   const bars = await fetchBars(normalized);
   return snapshotFromBars(normalized, bars, positionFor(positions, normalized));
@@ -651,6 +771,8 @@ export async function runBacktest(
   log: Logger,
   rules: StrategyRules = guardrails,
   historicalOverride?: Array<{ symbol: string; bars: Bar[] }>,
+  timeframe: Timeframe = "1Day",
+  feed: DataFeed = "iex",
 ) {
   if (!hasCredentials()) {
     throw new Error("Alpaca credentials are required for a historical backtest.");
@@ -672,7 +794,7 @@ export async function runBacktest(
     (await Promise.all(
       selectedSymbols.map(async (symbol) => ({
         symbol,
-        bars: await fetchHistoricalBars(symbol, start, end),
+          bars: await fetchHistoricalBars(symbol, start, end, timeframe, feed),
       })),
     ));
   const usable = historical.filter(({ bars }) => bars.length >= 22);
@@ -735,6 +857,7 @@ export async function runBacktest(
               side: state.position.side,
               avgEntryPrice: state.position.entryPrice,
               currentPrice: price,
+              marketValue: state.position.quantity * price,
               unrealizedPnl:
                 state.position.side === "long"
                   ? (price - state.position.entryPrice) * state.position.quantity
@@ -860,7 +983,8 @@ export async function runBacktest(
 
   return RunBacktestResponse.parse({
     mode: "paper",
-    timeframe: "1Day",
+    timeframe,
+    feed,
     symbols: usable.map(({ symbol }) => symbol),
     start,
     end,
@@ -886,6 +1010,8 @@ export async function optimizeBacktest(
   end: string,
   initialCapital: number,
   log: Logger,
+  timeframe: Timeframe = "1Day",
+  feed: DataFeed = "iex",
 ) {
   if (!hasCredentials()) {
     throw new Error("Alpaca credentials are required to optimize the strategy.");
@@ -901,7 +1027,7 @@ export async function optimizeBacktest(
   const historical = await Promise.all(
     selectedSymbols.map(async (symbol) => ({
       symbol,
-      bars: await fetchHistoricalBars(symbol, start, end),
+      bars: await fetchHistoricalBars(symbol, start, end, timeframe, feed),
     })),
   );
   const baseline = await runBacktest(
@@ -912,6 +1038,8 @@ export async function optimizeBacktest(
     log,
     guardrails,
     historical,
+    timeframe,
+    feed,
   );
   const entryZValues = [1.25, 1.5, 1.75, 2, 2.25, 2.5];
   const adxMaxValues = [15, 20, 25, 30];
@@ -942,6 +1070,8 @@ export async function optimizeBacktest(
           log,
           { ...guardrails, ...settings },
           historical,
+          timeframe,
+          feed,
         );
         candidates.push({
           settings,
@@ -972,7 +1102,8 @@ export async function optimizeBacktest(
 
   return OptimizeBacktestResponse.parse({
     mode: "paper",
-    timeframe: "1Day",
+    timeframe,
+    feed,
     symbols: baseline.symbols,
     start,
     end,

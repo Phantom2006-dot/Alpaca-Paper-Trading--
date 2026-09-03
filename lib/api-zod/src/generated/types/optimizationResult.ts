@@ -13,6 +13,7 @@ import type { OptimizationSettings } from './optimizationSettings';
 export interface OptimizationResult {
   mode: OptimizationResultMode;
   timeframe: string;
+  feed: string;
   symbols: string[];
   start: Date;
   end: Date;

@@ -51,6 +51,51 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AgentStatus"
+  /agent/assets:
+    get:
+      operationId: getAgentAssets
+      tags: [agent]
+      summary: Search tradable Alpaca assets
+      parameters:
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 40
+      responses:
+        "200":
+          description: Tradable assets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TradableAsset"
+        "502":
+          description: Alpaca unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /agent/account:
+    get:
+      operationId: getAgentAccount
+      tags: [agent]
+      summary: Get paper account, positions, and orders
+      responses:
+        "200":
+          description: Account overview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentAccountOverview"
+        "502":
+          description: Alpaca unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /agent/run:
     post:
       operationId: runStrategy
@@ -211,6 +256,12 @@ components:
           exclusiveMinimum: 0
         settings:
           $ref: "#/components/schemas/OptimizationSettings"
+        timeframe:
+          type: string
+          enum: [1Min, 5Min, 15Min, 1Hour, 1Day]
+        feed:
+          type: string
+          enum: [iex, sip, delayed_sip]
       required: [symbols, start, end, initialCapital]
     OptimizeBacktestInput:
       type: object
@@ -231,6 +282,12 @@ components:
         initialCapital:
           type: number
           exclusiveMinimum: 0
+        timeframe:
+          type: string
+          enum: [1Min, 5Min, 15Min, 1Hour, 1Day]
+        feed:
+          type: string
+          enum: [iex, sip, delayed_sip]
       required: [symbols, start, end, initialCapital]
     OptimizationSettings:
       type: object
@@ -293,6 +350,8 @@ components:
           enum: [paper]
         timeframe:
           type: string
+        feed:
+          type: string
         symbols:
           type: array
           items:
@@ -332,7 +391,7 @@ components:
         ranAt:
           type: string
           format: date-time
-      required: [mode, timeframe, symbols, start, end, barsLoaded, initialCapital, finalEquity, netPnl, returnPct, maxDrawdownPct, totalTrades, winningTrades, losingTrades, winRate, benchmarkReturnPct, trades, ranAt]
+      required: [mode, timeframe, feed, symbols, start, end, barsLoaded, initialCapital, finalEquity, netPnl, returnPct, maxDrawdownPct, totalTrades, winningTrades, losingTrades, winRate, benchmarkReturnPct, trades, ranAt]
     OptimizationResult:
       type: object
       properties:
@@ -340,6 +399,8 @@ components:
           type: string
           enum: [paper]
         timeframe:
+          type: string
+        feed:
           type: string
         symbols:
           type: array
@@ -368,7 +429,25 @@ components:
         ranAt:
           type: string
           format: date-time
-      required: [mode, timeframe, symbols, start, end, initialCapital, candidatesTested, baseline, best, bestSettings, leaderboard, ranAt]
+      required: [mode, timeframe, feed, symbols, start, end, initialCapital, candidatesTested, baseline, best, bestSettings, leaderboard, ranAt]
+    TradableAsset:
+      type: object
+      properties:
+        symbol:
+          type: string
+        name:
+          type: string
+        exchange:
+          type: string
+        assetClass:
+          type: string
+        status:
+          type: string
+        tradable:
+          type: boolean
+        fractionable:
+          type: boolean
+      required: [symbol, name, exchange, assetClass, status, tradable, fractionable]
     AgentAccount:
       type: object
       properties:
@@ -385,6 +464,63 @@ components:
         currency:
           type: string
       required: [equity, cash, buyingPower, dayPnl, dayPnlPct, currency]
+    AccountPosition:
+      type: object
+      properties:
+        symbol:
+          type: string
+        qty:
+          type: number
+        side:
+          type: string
+          enum: [long, short]
+        avgEntryPrice:
+          type: number
+        currentPrice:
+          type: number
+        marketValue:
+          type: number
+        unrealizedPnl:
+          type: number
+      required: [symbol, qty, side, avgEntryPrice, currentPrice, marketValue, unrealizedPnl]
+    AccountOrder:
+      type: object
+      properties:
+        id:
+          type: string
+        symbol:
+          type: string
+        side:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+        qty:
+          type: number
+        filledQty:
+          type: number
+        submittedAt:
+          type: string
+        filledAt:
+          type: ["string", "null"]
+      required: [id, symbol, side, type, status, qty, filledQty, submittedAt, filledAt]
+    AgentAccountOverview:
+      type: object
+      properties:
+        account:
+          $ref: "#/components/schemas/AgentAccount"
+        positions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AccountPosition"
+        orders:
+          type: array
+          items:
+            $ref: "#/components/schemas/AccountOrder"
+        fetchedAt:
+          type: string
+      required: [account, positions, orders, fetchedAt]
     GuardrailState:
       type: object
       properties:
@@ -566,6 +702,8 @@ components:
             minLength: 1
         dryRun:
           type: boolean
+        settings:
+          $ref: "#/components/schemas/OptimizationSettings"
       required: [symbols, dryRun]
     StrategyRunResult:
       type: object

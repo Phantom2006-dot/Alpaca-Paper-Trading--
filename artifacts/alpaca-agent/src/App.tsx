@@ -24,6 +24,7 @@ import {
   SlidersHorizontal,
   TrendingUp,
   Unplug,
+  WalletCards,
   X,
   Zap,
 } from 'lucide-react';
@@ -34,6 +35,10 @@ import {
   getGetAgentDashboardQueryKey,
   getGetAgentStatusQueryKey,
   getGetMarketSnapshotQueryKey,
+  getGetAgentAccountQueryKey,
+  getGetAgentAssetsQueryKey,
+  useGetAgentAccount,
+  useGetAgentAssets,
   useFlattenAgentPositions,
   useGetAgentDashboard,
   useGetAgentStatus,
@@ -46,11 +51,15 @@ import {
 import type {
   AgentDashboard,
   AgentStatus,
+  AgentAccountOverview,
+  BacktestInputFeed,
+  BacktestInputTimeframe,
   BacktestResult,
   OptimizationResult,
   GuardrailState,
   StrategyActivity,
   SymbolSnapshot,
+  TradableAsset,
 } from '@workspace/api-client-react';
 import { Link, Route, Switch, Router as WouterRouter, useLocation } from 'wouter';
 
@@ -62,6 +71,7 @@ const navItems = [
   { href: '/backtest', label: 'Backtest', short: 'TEST', icon: Database },
   { href: '/activity', label: 'Activity log', short: 'AUDIT', icon: ListChecks },
   { href: '/settings', label: 'Settings', short: 'SETUP', icon: SlidersHorizontal },
+  { href: '/account', label: 'Account & orders', short: 'ACCOUNT', icon: WalletCards },
 ];
 
 const fallbackSnapshots: SymbolSnapshot[] = [];
@@ -292,6 +302,40 @@ function EmptyState({ title, description }: { title: string; description: string
       <div className="empty-state-mark"><Crosshair size={19} /></div>
       <div className="font-display text-sm font-bold">{title}</div>
       <p className="mt-1 max-w-sm text-center text-xs leading-relaxed text-muted-foreground">{description}</p>
+    </div>
+  );
+}
+
+function AssetPicker({ selected, onChange, max = 8 }: { selected: string[]; onChange: (symbols: string[]) => void; max?: number }) {
+  const [search, setSearch] = useState('');
+  const assetsQuery = useGetAgentAssets(
+    { search: search || undefined },
+    { query: { queryKey: getGetAgentAssetsQueryKey({ search: search || undefined }), staleTime: 60000 } },
+  );
+  const toggle = (symbol: string) => {
+    const next = selected.includes(symbol) ? selected.filter((item) => item !== symbol) : selected.length < max ? [...selected, symbol] : selected;
+    onChange(next);
+  };
+  return (
+    <div className="asset-picker" data-testid="asset-picker">
+      <div className="asset-picker-search">
+        <Search size={13} />
+        <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search Alpaca assets by symbol or name" data-testid="input-asset-search" />
+        {assetsQuery.isFetching && <RefreshCw size={12} className="animate-spin text-muted-foreground" />}
+      </div>
+      <div className="asset-chips">
+        {selected.map((symbol) => <button className="asset-chip" key={symbol} onClick={() => toggle(symbol)} type="button">{symbol}<X size={11} /></button>)}
+        {!selected.length && <span className="text-[10px] text-muted-foreground">No assets selected</span>}
+      </div>
+      <div className="asset-results">
+        {assetsQuery.data?.slice(0, 12).map((asset: TradableAsset) => (
+          <button type="button" className={cx('asset-result', selected.includes(asset.symbol) && 'is-selected')} key={asset.symbol} onClick={() => toggle(asset.symbol)} disabled={!selected.includes(asset.symbol) && selected.length >= max} data-testid={`button-asset-${asset.symbol}`}>
+            <span><strong>{asset.symbol}</strong><small>{asset.name}</small></span><span>{selected.includes(asset.symbol) ? <Check size={13} /> : asset.exchange}</span>
+          </button>
+        ))}
+        {!assetsQuery.isLoading && !assetsQuery.data?.length && <span className="p-3 text-[10px] text-muted-foreground">No tradable assets match this search.</span>}
+      </div>
+      <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground">{selected.length} / {max} selected · search blank to browse Alpaca’s available tradable assets</div>
     </div>
   );
 }
@@ -541,6 +585,32 @@ function StrategyPage() {
 }
 
 function StrategyContent({ guardrails, symbols }: { guardrails: GuardrailState; symbols: string[] }) {
+  const queryClient = useQueryClient();
+  const run = useRunStrategy();
+  const [selectedSymbols, setSelectedSymbols] = useState(symbols);
+  const [entryZ, setEntryZ] = useState(String(guardrails.entryZ));
+  const [adxMax, setAdxMax] = useState(String(guardrails.adxMax));
+  const [minVolumeRatio, setMinVolumeRatio] = useState(String(guardrails.minVolumeRatio));
+  const [notice, setNotice] = useState('');
+  const submitScan = () => {
+    if (!selectedSymbols.length) {
+      setNotice('Select at least one tradable asset before scanning.');
+      return;
+    }
+    const settings = { entryZ: Number(entryZ), adxMax: Number(adxMax), minVolumeRatio: Number(minVolumeRatio) };
+    if (Object.values(settings).some((value) => !Number.isFinite(value) || value <= 0)) {
+      setNotice('Strategy thresholds must be positive numbers.');
+      return;
+    }
+    setNotice('');
+    run.mutate({ data: { symbols: selectedSymbols, dryRun: true, settings } }, {
+      onSuccess: (result) => {
+        setNotice(`Paper scan complete · ${result.evaluated} assets evaluated · ${result.actions.length} actions`);
+        queryClient.invalidateQueries({ queryKey: getGetAgentDashboardQueryKey() });
+      },
+      onError: () => setNotice('The paper scan could not be completed. Check the Alpaca connection and retry.'),
+    });
+  };
   const gates = [
     { label: 'Volume confirmation', detail: 'Current volume must clear the recent average before a signal can advance.', enabled: guardrails.volumeFilter, value: `${guardrails.minVolumeRatio.toFixed(2)}x min` },
     { label: 'Trend strength gate', detail: 'Avoid entries when directional pressure says mean reversion is fighting the tape.', enabled: guardrails.adxFilter, value: `ADX < ${guardrails.adxMax.toFixed(0)}` },
@@ -574,6 +644,25 @@ function StrategyContent({ guardrails, symbols }: { guardrails: GuardrailState; 
       <div className="panel">
         <CardHeader eyebrow="03 / active guardrails" title="Why the agent can say no" action={<span className="font-mono text-[10px] text-muted-foreground">{symbols.length} symbols in scope</span>} />
         <div className="guardrail-list">{gates.map((gate) => <GuardrailRow key={gate.label} {...gate} />)}</div>
+      </div>
+      <div className="panel operator-panel">
+        <CardHeader eyebrow="04 / operator controls" title="Choose the paper scan" action={<span className="status-chip is-good"><span /> paper-only</span>} />
+        <div className="operator-panel-body">
+          <div>
+            <div className="field-label">Assets</div>
+            <AssetPicker selected={selectedSymbols} onChange={setSelectedSymbols} />
+          </div>
+          <div className="strategy-tuner">
+            <div className="field-label">Tune strategy thresholds</div>
+            <div className="settings-field-grid">
+              <label><span className="field-label">Entry Z</span><input type="number" min="0.1" step="0.05" value={entryZ} onChange={(event) => setEntryZ(event.target.value)} data-testid="input-strategy-entry-z" /></label>
+              <label><span className="field-label">ADX max</span><input type="number" min="1" step="1" value={adxMax} onChange={(event) => setAdxMax(event.target.value)} data-testid="input-strategy-adx-max" /></label>
+              <label><span className="field-label">Volume floor</span><input type="number" min="0.1" step="0.05" value={minVolumeRatio} onChange={(event) => setMinVolumeRatio(event.target.value)} data-testid="input-strategy-volume-ratio" /></label>
+            </div>
+            <button className="button button-primary mt-4" onClick={submitScan} disabled={run.isPending} data-testid="button-run-configured-scan">{run.isPending ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />} {run.isPending ? 'Scanning…' : 'Run paper scan'}</button>
+          </div>
+        </div>
+        {notice && <div className="notice-banner m-5 mt-0"><Info size={14} /><span>{notice}</span></div>}
       </div>
       <div className="explain-grid">
         <div className="panel explanation-panel"><div className="explanation-number">A</div><div><div className="eyebrow">When it enters</div><h3>Extreme distance, quiet trend.</h3><p>Price must be sufficiently far from its moving mean while ADX and volume confirm the setup is not simply momentum in disguise.</p></div></div>
@@ -687,6 +776,11 @@ function BacktestPage() {
   const [start, setStart] = useState(defaultStart);
   const [end, setEnd] = useState(today);
   const [initialCapital, setInitialCapital] = useState('100000');
+  const [timeframe, setTimeframe] = useState<BacktestInputTimeframe>('1Day');
+  const [feed, setFeed] = useState<BacktestInputFeed>('iex');
+  const [entryZ, setEntryZ] = useState('2');
+  const [adxMax, setAdxMax] = useState('25');
+  const [minVolumeRatio, setMinVolumeRatio] = useState('1');
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [optimization, setOptimization] = useState<OptimizationResult | null>(null);
   const [notice, setNotice] = useState('');
@@ -702,7 +796,14 @@ function BacktestPage() {
       setNotice('The start date must be before the end date.');
       return null;
     }
-    return { symbols: selectedSymbols, start, end, initialCapital: capital };
+    return {
+      symbols: selectedSymbols,
+      start,
+      end,
+      initialCapital: capital,
+      timeframe,
+      feed,
+    };
   };
 
   const submit = () => {
@@ -710,7 +811,7 @@ function BacktestPage() {
     if (!input) return;
     setNotice('');
     setResult(null);
-    run.mutate({ data: input }, {
+    run.mutate({ data: { ...input, settings: { entryZ: Number(entryZ), adxMax: Number(adxMax), minVolumeRatio: Number(minVolumeRatio) } } }, {
       onSuccess: (backtest) => setResult(backtest),
       onError: () => setNotice('The Alpaca backtest could not be completed. Check the date range and API connection, then retry.'),
     });
@@ -729,14 +830,19 @@ function BacktestPage() {
 
   return (
     <>
-      <PageIntro eyebrow="Research / historical replay" title="Test the decision path." description="Replay the strategy against Alpaca daily bars. This is a read-only simulation: no orders are submitted." action={<Link href="/" className="button button-secondary" data-testid="link-back-control-room"><LayoutDashboard size={14} /> Control room</Link>} />
+      <PageIntro eyebrow="Research / historical replay" title="Test the decision path." description="Choose the Alpaca universe, market-data feed, timeframe, and strategy thresholds. This is a read-only simulation: no orders are submitted." action={<Link href="/" className="button button-secondary" data-testid="link-back-control-room"><LayoutDashboard size={14} /> Control room</Link>} />
       <div className="panel backtest-form" data-testid="panel-backtest-form">
-        <CardHeader eyebrow="01 / test parameters" title="Choose a replay window" action={<div className="mode-pill is-paper"><span className="mode-pill-dot" /> Alpaca IEX data</div>} />
+        <CardHeader eyebrow="01 / test parameters" title="Choose a replay window" action={<div className="mode-pill is-paper"><span className="mode-pill-dot" /> Alpaca {feed.toUpperCase()} data</div>} />
         <div className="backtest-fields">
-          <label><span>Symbols</span><input value={symbols} onChange={(event) => setSymbols(event.target.value)} placeholder="SPY, QQQ, AAPL" data-testid="input-backtest-symbols" /><small>Comma-separated · maximum 8</small></label>
+          <label className="backtest-symbols-field"><span>Symbols</span><input value={symbols} onChange={(event) => setSymbols(event.target.value)} placeholder="SPY, QQQ, AAPL" data-testid="input-backtest-symbols" /><small>Comma-separated · maximum 8</small><AssetPicker selected={symbols.split(',').map((symbol) => symbol.trim().toUpperCase()).filter(Boolean)} onChange={(next) => setSymbols(next.join(', '))} /></label>
           <label><span>Initial capital</span><input type="number" min="1" step="1000" value={initialCapital} onChange={(event) => setInitialCapital(event.target.value)} data-testid="input-backtest-capital" /><small>Each symbol receives an equal allocation</small></label>
           <label><span>Start date</span><input type="date" value={start} max={end} onChange={(event) => setStart(event.target.value)} data-testid="input-backtest-start" /></label>
           <label><span>End date</span><input type="date" value={end} min={start} onChange={(event) => setEnd(event.target.value)} data-testid="input-backtest-end" /></label>
+          <label><span>Timeframe</span><select value={timeframe} onChange={(event) => setTimeframe(event.target.value as BacktestInputTimeframe)} data-testid="select-backtest-timeframe"><option value="1Min">1 minute</option><option value="5Min">5 minutes</option><option value="15Min">15 minutes</option><option value="1Hour">1 hour</option><option value="1Day">1 day</option></select><small>Intraday ranges may be limited by data availability</small></label>
+          <label><span>Market-data feed</span><select value={feed} onChange={(event) => setFeed(event.target.value as BacktestInputFeed)} data-testid="select-backtest-feed"><option value="iex">IEX · included</option><option value="sip">SIP · entitlement required</option><option value="delayed_sip">Delayed SIP</option></select><small>Alpaca account permissions apply</small></label>
+          <label><span>Entry Z threshold</span><input type="number" min="0.1" step="0.05" value={entryZ} onChange={(event) => setEntryZ(event.target.value)} data-testid="input-backtest-entry-z" /><small>Distance from the moving mean</small></label>
+          <label><span>ADX maximum</span><input type="number" min="1" step="1" value={adxMax} onChange={(event) => setAdxMax(event.target.value)} data-testid="input-backtest-adx-max" /><small>Reject stronger trends</small></label>
+          <label><span>Minimum volume ratio</span><input type="number" min="0.1" step="0.05" value={minVolumeRatio} onChange={(event) => setMinVolumeRatio(event.target.value)} data-testid="input-backtest-volume-ratio" /><small>Compared with the recent average</small></label>
         </div>
         <div className="status-footer backtest-form-footer">
           <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><LockKeyhole size={13} /> Simulation only · no order endpoint is used</div>
@@ -767,6 +873,40 @@ function ActivityPage() {
         <div className="panel activity-page-panel">
           <CardHeader eyebrow="Event stream" title="Decision ledger" action={<div className="filter-tabs">{['all', 'submitted', 'simulated', 'blocked', 'closed'].map((item) => <button className={cx(filter === item && 'is-active')} onClick={() => setFilter(item)} key={item} data-testid={`button-filter-${item}`}>{item}</button>)}</div>} />
           {activity.length ? <ActivityList activity={activity} /> : <EmptyState title="No events match this filter" description="Try another status or return after the next scan." />}
+        </div>
+      )}
+    </>
+  );
+}
+
+function AccountPage() {
+  const accountQuery = useGetAgentAccount({ query: { queryKey: getGetAgentAccountQueryKey(), refetchInterval: 30000 } });
+  const overview = accountQuery.data;
+  return (
+    <>
+      <PageIntro eyebrow="Account / paper ledger" title="Know what Alpaca knows." description="Inspect the paper account, open positions, and recent orders directly from the Alpaca account adapter." action={<button className="button button-secondary" onClick={() => accountQuery.refetch()} disabled={accountQuery.isFetching} data-testid="button-refresh-account"><RefreshCw size={14} className={accountQuery.isFetching ? 'animate-spin' : ''} /> Refresh</button>} />
+      {accountQuery.isLoading ? <LoadingPanel rows={7} /> : accountQuery.isError || !overview ? <ErrorPanel onRetry={() => accountQuery.refetch()} /> : (
+        <div className="space-y-5">
+          <AccountStrip account={overview.account} />
+          <div className="account-ledger-grid">
+            <div className="panel overflow-hidden">
+              <CardHeader eyebrow="01 / open exposure" title="Positions" action={<span className="font-mono text-[10px] text-muted-foreground">{overview.positions.length} open</span>} />
+              {overview.positions.length === 0 ? <EmptyState title="No open positions" description="Paper positions opened through Alpaca will appear here." /> : (
+                <div className="table-scroll"><table className="data-table"><thead><tr><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>Mark</th><th>Market value</th><th>Unrealized</th></tr></thead><tbody>
+                  {overview.positions.map((position) => <tr key={position.symbol}><td><strong>{position.symbol}</strong></td><td className="text-xs uppercase">{position.side}</td><td className="font-mono text-xs">{position.qty}</td><td className="font-mono text-xs">{money(position.avgEntryPrice)}</td><td className="font-mono text-xs">{money(position.currentPrice)}</td><td className="font-mono text-xs">{money(position.marketValue)}</td><td className={cx('font-mono text-xs', position.unrealizedPnl >= 0 ? 'text-primary' : 'text-destructive')}>{money(position.unrealizedPnl)}</td></tr>)}
+                </tbody></table></div>
+              )}
+            </div>
+            <div className="panel overflow-hidden">
+              <CardHeader eyebrow="02 / order history" title="Recent orders" action={<span className="font-mono text-[10px] text-muted-foreground">{overview.orders.length} returned</span>} />
+              {overview.orders.length === 0 ? <EmptyState title="No orders returned" description="Paper orders submitted through the agent will be listed here." /> : (
+                <div className="table-scroll"><table className="data-table"><thead><tr><th>Symbol</th><th>Side</th><th>Type</th><th>Status</th><th>Qty</th><th>Submitted</th></tr></thead><tbody>
+                  {overview.orders.map((order) => <tr key={order.id}><td><strong>{order.symbol}</strong></td><td className="text-xs uppercase">{order.side}</td><td className="text-xs uppercase">{order.type}</td><td><span className="trade-state is-clear">{order.status}</span></td><td className="font-mono text-xs">{order.filledQty} / {order.qty}</td><td className="font-mono text-xs">{formatDateTime(order.submittedAt)}</td></tr>)}
+                </tbody></table></div>
+              )}
+            </div>
+          </div>
+          <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground">Last account sync · {formatDateTime(overview.fetchedAt)} · paper adapter only</div>
         </div>
       )}
     </>
@@ -810,7 +950,7 @@ function NotFound() {
 }
 
 function Router() {
-  return <ErrorBoundary><Shell><Switch><Route path="/" component={DashboardPage} /><Route path="/strategy" component={StrategyPage} /><Route path="/backtest" component={BacktestPage} /><Route path="/activity" component={ActivityPage} /><Route path="/settings" component={SettingsPage} /><Route component={NotFound} /></Switch></Shell></ErrorBoundary>;
+  return <ErrorBoundary><Shell><Switch><Route path="/" component={DashboardPage} /><Route path="/strategy" component={StrategyPage} /><Route path="/backtest" component={BacktestPage} /><Route path="/activity" component={ActivityPage} /><Route path="/settings" component={SettingsPage} /><Route path="/account" component={AccountPage} /><Route component={NotFound} /></Switch></Shell></ErrorBoundary>;
 }
 
 function App() {

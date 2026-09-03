@@ -5,11 +5,14 @@ import {
   OptimizeBacktestBody,
   RunBacktestBody,
   RunStrategyBody,
+  GetAgentAssetsQueryParams,
 } from "@workspace/api-zod";
 
 import {
   flattenPositions,
   guardrails,
+  getAgentAccount,
+  getAgentAssets,
   getDashboard,
   getMarketSnapshot,
   getStatus,
@@ -33,6 +36,29 @@ router.get("/agent/status", async (req, res): Promise<void> => {
   res.json(await getStatus());
 });
 
+router.get("/agent/assets", async (req, res): Promise<void> => {
+  const parsed = GetAgentAssetsQueryParams.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  try {
+    res.json(await getAgentAssets(parsed.data.search));
+  } catch (error) {
+    req.log.error({ err: error }, "Asset search failed");
+    res.status(502).json({ error: error instanceof Error ? error.message : "Asset search failed" });
+  }
+});
+
+router.get("/agent/account", async (req, res): Promise<void> => {
+  try {
+    res.json(await getAgentAccount());
+  } catch (error) {
+    req.log.error({ err: error }, "Account overview failed");
+    res.status(502).json({ error: error instanceof Error ? error.message : "Account overview failed" });
+  }
+});
+
 router.post("/agent/run", async (req, res): Promise<void> => {
   const parsed = RunStrategyBody.safeParse(req.body);
   if (!parsed.success) {
@@ -41,7 +67,14 @@ router.post("/agent/run", async (req, res): Promise<void> => {
     return;
   }
   try {
-    res.json(await runStrategy(parsed.data.symbols, parsed.data.dryRun, req.log));
+    res.json(
+      await runStrategy(
+        parsed.data.symbols,
+        parsed.data.dryRun,
+        req.log,
+        parsed.data.settings ? { ...guardrails, ...parsed.data.settings } : guardrails,
+      ),
+    );
   } catch (error) {
     req.log.error({ err: error }, "Strategy scan failed");
     res.status(502).json({ error: error instanceof Error ? error.message : "Strategy scan failed" });
@@ -64,6 +97,9 @@ router.post("/agent/backtest", async (req, res): Promise<void> => {
         parsed.data.initialCapital,
         req.log,
         parsed.data.settings ? { ...guardrails, ...parsed.data.settings } : guardrails,
+        undefined,
+        parsed.data.timeframe,
+        parsed.data.feed,
       ),
     );
   } catch (error) {
@@ -89,6 +125,8 @@ router.post("/agent/optimize", async (req, res): Promise<void> => {
         parsed.data.end.toISOString().slice(0, 10),
         parsed.data.initialCapital,
         req.log,
+        parsed.data.timeframe,
+        parsed.data.feed,
       ),
     );
   } catch (error) {

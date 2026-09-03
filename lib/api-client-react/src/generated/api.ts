@@ -20,18 +20,21 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AgentAccountOverview,
   AgentDashboard,
   AgentStatus,
   BacktestInput,
   BacktestResult,
   ErrorResponse,
   FlattenResult,
+  GetAgentAssetsParams,
   HealthStatus,
   OptimizationResult,
   OptimizeBacktestInput,
   RunStrategyInput,
   StrategyRunResult,
-  SymbolSnapshot
+  SymbolSnapshot,
+  TradableAsset
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -283,6 +286,167 @@ export function useGetAgentStatus<TData = Awaited<ReturnType<typeof getAgentStat
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetAgentStatusQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetAgentAssetsUrl = (params?: GetAgentAssetsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/agent/assets?${stringifiedParams}` : `/api/agent/assets`
+}
+
+/**
+ * @summary Search tradable Alpaca assets
+ */
+export const getAgentAssets = async (params?: GetAgentAssetsParams, options?: Parameters<typeof customFetch>[1]): Promise<TradableAsset[]> => {
+
+  return customFetch<TradableAsset[]>(getGetAgentAssetsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAgentAssetsQueryKey = (params?: GetAgentAssetsParams,) => {
+    return [
+    `/api/agent/assets`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAgentAssetsQueryOptions = <TData = Awaited<ReturnType<typeof getAgentAssets>>, TError = ErrorType<ErrorResponse>>(params?: GetAgentAssetsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAgentAssets>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAgentAssetsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAgentAssets>>> = ({ signal }) => getAgentAssets(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAgentAssets>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAgentAssetsQueryResult = NonNullable<Awaited<ReturnType<typeof getAgentAssets>>>
+export type GetAgentAssetsQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Search tradable Alpaca assets
+ */
+
+export function useGetAgentAssets<TData = Awaited<ReturnType<typeof getAgentAssets>>, TError = ErrorType<ErrorResponse>>(
+ params?: GetAgentAssetsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAgentAssets>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAgentAssetsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetAgentAccountUrl = () => {
+
+
+
+
+  return `/api/agent/account`
+}
+
+/**
+ * @summary Get paper account, positions, and orders
+ */
+export const getAgentAccount = async ( options?: Parameters<typeof customFetch>[1]): Promise<AgentAccountOverview> => {
+
+  return customFetch<AgentAccountOverview>(getGetAgentAccountUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAgentAccountQueryKey = () => {
+    return [
+    `/api/agent/account`
+    ] as const;
+    }
+
+
+export const getGetAgentAccountQueryOptions = <TData = Awaited<ReturnType<typeof getAgentAccount>>, TError = ErrorType<ErrorResponse>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAgentAccount>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAgentAccountQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAgentAccount>>> = ({ signal }) => getAgentAccount({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAgentAccount>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAgentAccountQueryResult = NonNullable<Awaited<ReturnType<typeof getAgentAccount>>>
+export type GetAgentAccountQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Get paper account, positions, and orders
+ */
+
+export function useGetAgentAccount<TData = Awaited<ReturnType<typeof getAgentAccount>>, TError = ErrorType<ErrorResponse>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAgentAccount>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAgentAccountQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

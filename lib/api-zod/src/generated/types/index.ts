@@ -6,12 +6,18 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './accountOrder';
+export * from './accountPosition';
+export * from './accountPositionSide';
 export * from './agentAccount';
+export * from './agentAccountOverview';
 export * from './agentDashboard';
 export * from './agentDashboardMetrics';
 export * from './agentStatus';
 export * from './agentStatusMode';
 export * from './backtestInput';
+export * from './backtestInputFeed';
+export * from './backtestInputTimeframe';
 export * from './backtestResult';
 export * from './backtestResultMode';
 export * from './backtestTrade';
@@ -19,6 +25,7 @@ export * from './backtestTradeSide';
 export * from './errorResponse';
 export * from './flattenResult';
 export * from './flattenResultMode';
+export * from './getAgentAssetsParams';
 export * from './guardrailState';
 export * from './healthStatus';
 export * from './optimizationCandidate';
@@ -26,6 +33,8 @@ export * from './optimizationResult';
 export * from './optimizationResultMode';
 export * from './optimizationSettings';
 export * from './optimizeBacktestInput';
+export * from './optimizeBacktestInputFeed';
+export * from './optimizeBacktestInputTimeframe';
 export * from './runStrategyInput';
 export * from './strategyActivity';
 export * from './strategyActivityStatus';
@@ -35,3 +44,4 @@ export * from './symbolSnapshot';
 export * from './symbolSnapshotPositionSide';
 export * from './symbolSnapshotRegime';
 export * from './symbolSnapshotSignal';
+export * from './tradableAsset';

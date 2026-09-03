@@ -122,6 +122,65 @@ export const GetAgentStatusResponse = zod.object({
 
 
 /**
+ * @summary Search tradable Alpaca assets
+ */
+export const getAgentAssetsQuerySearchMax = 40;
+
+
+
+export const GetAgentAssetsQueryParams = zod.object({
+  "search": zod.coerce.string().max(getAgentAssetsQuerySearchMax).optional()
+})
+
+export const GetAgentAssetsResponseItem = zod.object({
+  "symbol": zod.string(),
+  "name": zod.string(),
+  "exchange": zod.string(),
+  "assetClass": zod.string(),
+  "status": zod.string(),
+  "tradable": zod.boolean(),
+  "fractionable": zod.boolean()
+})
+export const GetAgentAssetsResponse = zod.array(GetAgentAssetsResponseItem)
+
+
+/**
+ * @summary Get paper account, positions, and orders
+ */
+export const GetAgentAccountResponse = zod.object({
+  "account": zod.object({
+  "equity": zod.number(),
+  "cash": zod.number(),
+  "buyingPower": zod.number(),
+  "dayPnl": zod.number(),
+  "dayPnlPct": zod.number(),
+  "currency": zod.string()
+}),
+  "positions": zod.array(zod.object({
+  "symbol": zod.string(),
+  "qty": zod.number(),
+  "side": zod.enum(['long', 'short']),
+  "avgEntryPrice": zod.number(),
+  "currentPrice": zod.number(),
+  "marketValue": zod.number(),
+  "unrealizedPnl": zod.number()
+})),
+  "orders": zod.array(zod.object({
+  "id": zod.string(),
+  "symbol": zod.string(),
+  "side": zod.string(),
+  "type": zod.string(),
+  "status": zod.string(),
+  "qty": zod.number(),
+  "filledQty": zod.number(),
+  "submittedAt": zod.string(),
+  "filledAt": zod.string().nullable()
+})),
+  "fetchedAt": zod.string()
+})
+
+
+/**
  * Evaluates the configured symbols and submits paper orders only when all guardrails pass.
  * @summary Run one strategy scan
  */
@@ -130,7 +189,12 @@ export const GetAgentStatusResponse = zod.object({
 
 export const RunStrategyBody = zod.object({
   "symbols": zod.array(zod.string().min(1)),
-  "dryRun": zod.boolean()
+  "dryRun": zod.boolean(),
+  "settings": zod.object({
+  "entryZ": zod.number(),
+  "adxMax": zod.number(),
+  "minVolumeRatio": zod.number()
+}).optional()
 })
 
 export const RunStrategyResponse = zod.object({
@@ -230,12 +294,15 @@ export const RunBacktestBody = zod.object({
   "entryZ": zod.number(),
   "adxMax": zod.number(),
   "minVolumeRatio": zod.number()
-}).optional()
+}).optional(),
+  "timeframe": zod.enum(['1Min', '5Min', '15Min', '1Hour', '1Day']).optional(),
+  "feed": zod.enum(['iex', 'sip', 'delayed_sip']).optional()
 })
 
 export const RunBacktestResponse = zod.object({
   "mode": zod.enum(['paper']),
   "timeframe": zod.string(),
+  "feed": zod.string(),
   "symbols": zod.array(zod.string()),
   "start": zod.coerce.date(),
   "end": zod.coerce.date(),
@@ -281,12 +348,15 @@ export const OptimizeBacktestBody = zod.object({
   "symbols": zod.array(zod.string().min(1)).min(1).max(optimizeBacktestBodySymbolsMax),
   "start": zod.coerce.date(),
   "end": zod.coerce.date(),
-  "initialCapital": zod.number().gt(optimizeBacktestBodyInitialCapitalExclusiveMin)
+  "initialCapital": zod.number().gt(optimizeBacktestBodyInitialCapitalExclusiveMin),
+  "timeframe": zod.enum(['1Min', '5Min', '15Min', '1Hour', '1Day']).optional(),
+  "feed": zod.enum(['iex', 'sip', 'delayed_sip']).optional()
 })
 
 export const OptimizeBacktestResponse = zod.object({
   "mode": zod.enum(['paper']),
   "timeframe": zod.string(),
+  "feed": zod.string(),
   "symbols": zod.array(zod.string()),
   "start": zod.coerce.date(),
   "end": zod.coerce.date(),
@@ -295,6 +365,7 @@ export const OptimizeBacktestResponse = zod.object({
   "baseline": zod.object({
   "mode": zod.enum(['paper']),
   "timeframe": zod.string(),
+  "feed": zod.string(),
   "symbols": zod.array(zod.string()),
   "start": zod.coerce.date(),
   "end": zod.coerce.date(),
@@ -326,6 +397,7 @@ export const OptimizeBacktestResponse = zod.object({
   "best": zod.object({
   "mode": zod.enum(['paper']),
   "timeframe": zod.string(),
+  "feed": zod.string(),
   "symbols": zod.array(zod.string()),
   "start": zod.coerce.date(),
   "end": zod.coerce.date(),

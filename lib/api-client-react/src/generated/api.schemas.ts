@@ -13,6 +13,26 @@ export interface ErrorResponse {
   error: string;
 }
 
+export type BacktestInputTimeframe = typeof BacktestInputTimeframe[keyof typeof BacktestInputTimeframe];
+
+
+export const BacktestInputTimeframe = {
+  '1Min': '1Min',
+  '5Min': '5Min',
+  '15Min': '15Min',
+  '1Hour': '1Hour',
+  '1Day': '1Day',
+} as const;
+
+export type BacktestInputFeed = typeof BacktestInputFeed[keyof typeof BacktestInputFeed];
+
+
+export const BacktestInputFeed = {
+  iex: 'iex',
+  sip: 'sip',
+  delayed_sip: 'delayed_sip',
+} as const;
+
 export interface OptimizationSettings {
   entryZ: number;
   adxMax: number;
@@ -31,7 +51,29 @@ export interface BacktestInput {
   /** @exclusiveMinimum 0 */
   initialCapital: number;
   settings?: OptimizationSettings;
+  timeframe?: BacktestInputTimeframe;
+  feed?: BacktestInputFeed;
 }
+
+export type OptimizeBacktestInputTimeframe = typeof OptimizeBacktestInputTimeframe[keyof typeof OptimizeBacktestInputTimeframe];
+
+
+export const OptimizeBacktestInputTimeframe = {
+  '1Min': '1Min',
+  '5Min': '5Min',
+  '15Min': '15Min',
+  '1Hour': '1Hour',
+  '1Day': '1Day',
+} as const;
+
+export type OptimizeBacktestInputFeed = typeof OptimizeBacktestInputFeed[keyof typeof OptimizeBacktestInputFeed];
+
+
+export const OptimizeBacktestInputFeed = {
+  iex: 'iex',
+  sip: 'sip',
+  delayed_sip: 'delayed_sip',
+} as const;
 
 export interface OptimizeBacktestInput {
   /**
@@ -44,6 +86,8 @@ export interface OptimizeBacktestInput {
   end: string;
   /** @exclusiveMinimum 0 */
   initialCapital: number;
+  timeframe?: OptimizeBacktestInputTimeframe;
+  feed?: OptimizeBacktestInputFeed;
 }
 
 export interface OptimizationCandidate {
@@ -86,6 +130,7 @@ export const BacktestResultMode = {
 export interface BacktestResult {
   mode: BacktestResultMode;
   timeframe: string;
+  feed: string;
   symbols: string[];
   start: string;
   end: string;
@@ -114,6 +159,7 @@ export const OptimizationResultMode = {
 export interface OptimizationResult {
   mode: OptimizationResultMode;
   timeframe: string;
+  feed: string;
   symbols: string[];
   start: string;
   end: string;
@@ -126,6 +172,16 @@ export interface OptimizationResult {
   ranAt: string;
 }
 
+export interface TradableAsset {
+  symbol: string;
+  name: string;
+  exchange: string;
+  assetClass: string;
+  status: string;
+  tradable: boolean;
+  fractionable: boolean;
+}
+
 export interface AgentAccount {
   equity: number;
   cash: number;
@@ -133,6 +189,44 @@ export interface AgentAccount {
   dayPnl: number;
   dayPnlPct: number;
   currency: string;
+}
+
+export type AccountPositionSide = typeof AccountPositionSide[keyof typeof AccountPositionSide];
+
+
+export const AccountPositionSide = {
+  long: 'long',
+  short: 'short',
+} as const;
+
+export interface AccountPosition {
+  symbol: string;
+  qty: number;
+  side: AccountPositionSide;
+  avgEntryPrice: number;
+  currentPrice: number;
+  marketValue: number;
+  unrealizedPnl: number;
+}
+
+export interface AccountOrder {
+  id: string;
+  symbol: string;
+  side: string;
+  type: string;
+  status: string;
+  qty: number;
+  filledQty: number;
+  submittedAt: string;
+  /** @nullable */
+  filledAt: string | null;
+}
+
+export interface AgentAccountOverview {
+  account: AgentAccount;
+  positions: AccountPosition[];
+  orders: AccountOrder[];
+  fetchedAt: string;
 }
 
 export interface GuardrailState {
@@ -264,6 +358,7 @@ export interface RunStrategyInput {
   /** @items.minLength 1 */
   symbols: string[];
   dryRun: boolean;
+  settings?: OptimizationSettings;
 }
 
 export type StrategyRunResultMode = typeof StrategyRunResultMode[keyof typeof StrategyRunResultMode];
@@ -296,4 +391,11 @@ export interface FlattenResult {
   at: string;
   message: string;
 }
+
+export type GetAgentAssetsParams = {
+/**
+ * @maxLength 40
+ */
+search?: string;
+};
 

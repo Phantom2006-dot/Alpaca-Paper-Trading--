@@ -5,6 +5,8 @@
  * Explainable Alpaca paper-trading agent API
  * OpenAPI spec version: 0.1.0
  */
+import type { OptimizeBacktestInputFeed } from './optimizeBacktestInputFeed';
+import type { OptimizeBacktestInputTimeframe } from './optimizeBacktestInputTimeframe';
 
 export interface OptimizeBacktestInput {
   /**
@@ -17,4 +19,6 @@ export interface OptimizeBacktestInput {
   end: Date;
   /** @exclusiveMinimum 0 */
   initialCapital: number;
+  timeframe?: OptimizeBacktestInputTimeframe;
+  feed?: OptimizeBacktestInputFeed;
 }

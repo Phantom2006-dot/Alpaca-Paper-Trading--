@@ -11,6 +11,7 @@ import type { BacktestTrade } from './backtestTrade';
 export interface BacktestResult {
   mode: BacktestResultMode;
   timeframe: string;
+  feed: string;
   symbols: string[];
   start: Date;
   end: Date;
