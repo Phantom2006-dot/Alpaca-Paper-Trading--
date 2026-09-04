@@ -1,0 +1,26 @@
+{
+  "buildCommand": "pnpm run build",
+  "devCommand": "pnpm run dev",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "framework": "vite",
+  "outputDirectory": "artifacts/alpaca-agent/dist",
+  "ignoreCommand": "git diff --quiet HEAD~ HEAD -- ./",
+  "env": {
+    "VITE_API_URL": "@VITE_API_URL"
+  },
+  "functions": {
+    "artifacts/api-server/src/routes/**": {
+      "runtime": "nodejs20.x"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/:match*",
+      "destination": "http://localhost:8080/api/:match*"
+    },
+    {
+      "source": "/:path((?!_next/static|_next/image|favicon.ico).*)",
+      "destination": "/index.html"
+    }
+  ]
+}
