@@ -11,6 +11,27 @@ env = { "CI" = "true" }
 [workflows]
 runButton = "Project"
 
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Run Alpaca Agent"
+
+[[workflows.workflow]]
+name = "Run Alpaca Agent"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "sh -c 'PORT=8080 pnpm --filter @workspace/api-server run dev & api_pid=$!; trap \"kill $api_pid 2>/dev/null || true\" EXIT INT TERM; PORT=24492 BASE_PATH=/ API_PORT=8080 pnpm --filter @workspace/alpaca-agent run dev'"
+waitForPort = 24492
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
 [agent]
 stack = "PNPM_WORKSPACE"
 expertMode = true
