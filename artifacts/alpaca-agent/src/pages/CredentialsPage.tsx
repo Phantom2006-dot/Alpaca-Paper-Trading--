@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useAuth } from '@clerk/react';
 import { Check, Eye, EyeOff, KeyRound, RefreshCw, ShieldCheck, X } from 'lucide-react';
 
+const apiUrl = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, '') ?? '';
+
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(' ');
 }
@@ -23,7 +25,8 @@ export function CredentialsPage() {
     setNotice(null);
     try {
       const token = await getToken();
-      const res = await fetch('/api/agent/credentials', {
+      if (!token) throw new Error('You must be signed in to connect Alpaca.');
+      const res = await fetch(`${apiUrl}/api/agent/credentials`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

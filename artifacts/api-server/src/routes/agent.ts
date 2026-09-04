@@ -27,11 +27,12 @@ import {
   startAgent,
   stopAgent,
   setUserCredentials,
+  validateAlpacaCredentials,
 } from "../lib/strategy";
 
 const router: IRouter = Router();
 
-router.post("/agent/credentials", (req, res): void => {
+router.post("/agent/credentials", async (req, res): Promise<void> => {
   const apiKey = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
   const apiSecret = typeof req.body?.apiSecret === "string" ? req.body.apiSecret.trim() : "";
   if (!apiKey || !apiSecret) {
@@ -43,8 +44,14 @@ router.post("/agent/credentials", (req, res): void => {
     res.status(401).json({ error: "Authentication required." });
     return;
   }
-  setUserCredentials(userId, { apiKey, apiSecret });
-  res.json({ message: "Paper trading credentials saved securely for this user." });
+  try {
+    await validateAlpacaCredentials({ apiKey, apiSecret });
+    setUserCredentials(userId, { apiKey, apiSecret });
+    res.json({ message: "Paper trading credentials verified and saved for this user." });
+  } catch (error) {
+    req.log.warn({ err: error }, "Alpaca credential verification failed");
+    res.status(422).json({ error: error instanceof Error ? error.message : "Alpaca rejected these credentials." });
+  }
 });
 
 router.get("/agent/dashboard", async (req, res): Promise<void> => {

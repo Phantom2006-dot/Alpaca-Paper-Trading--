@@ -1,3 +1,4 @@
+Alpaca credentials entered in the Credentials page are first verified against the paper `/v2/account` endpoint, then stored in server memory and scoped to the signed-in Clerk user. The execution adapter remains locked to `paper-api.alpaca.markets`.
 # Kairo AI Trading Agent
 
 An explainable, paper-only AI trading cockpit built on Alpaca Markets. Kairo scans market data, formulates a thesis, passes every decision through deterministic risk gates, executes paper orders, and exposes an audit trail in real time.
@@ -11,7 +12,7 @@ Users can choose either channel. The web Launch App and Start for free actions o
 
 ## Demo material
 
-The screen recording is available from the built frontend at [`/kairo-screen-recording.mp4`](artifacts/alpaca-agent/public/kairo-screen-recording.mp4).
+The screen recording is available here: <https://drive.google.com/file/d/1Q5AQ8GtF8a-fKYdYUy56Ce9dX2b_RfVu/view?usp=sharing>.
 
 > **Paper trading only.** The execution adapter is hardcoded to `paper-api.alpaca.markets`. No live order routing exists anywhere in this codebase.
 

@@ -51,6 +51,19 @@ export function setUserCredentials(userId: string, credentials: AlpacaCredential
   credentialsByUser.set(userId, credentials);
 }
 
+export async function validateAlpacaCredentials(credentials: AlpacaCredentials): Promise<void> {
+  const response = await fetch(`${PAPER_TRADING_URL}/v2/account`, {
+    headers: {
+      "APCA-API-KEY-ID": credentials.apiKey,
+      "APCA-API-SECRET-KEY": credentials.apiSecret,
+    },
+  });
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`Alpaca rejected these paper credentials (${response.status}): ${message.slice(0, 180)}`);
+  }
+}
+
 export function withUserCredentials<T>(userId: string, callback: () => T): T {
   const credentials = credentialsByUser.get(userId);
   return requestCredentials.run(credentials ?? { apiKey: "", apiSecret: "" }, callback);
