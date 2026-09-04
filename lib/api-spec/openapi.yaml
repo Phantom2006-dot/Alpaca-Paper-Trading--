@@ -89,6 +89,31 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AgentControlResult"
+  /agent/test-trade:
+    post:
+      operationId: testPaperRoundTrip
+      tags: [agent]
+      summary: Run a temporary paper round trip
+      description: Opens one small paper position, waits for the entry to fill, and immediately submits a market close. This never uses live trading.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TestTradeInput"
+      responses:
+        "200":
+          description: Paper round trip submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TestTradeResult"
+        "409":
+          description: Test trade cannot run in the current state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /agent/assets:
     get:
       operationId: getAgentAssets
@@ -792,6 +817,38 @@ components:
         message:
           type: string
       required: [status, message]
+    TestTradeInput:
+      type: object
+      properties:
+        symbol:
+          type: string
+          minLength: 1
+          default: MC
+        quantity:
+          type: number
+          minimum: 1
+          maximum: 10
+          default: 1
+    TestTradeResult:
+      type: object
+      properties:
+        symbol:
+          type: string
+        quantity:
+          type: number
+        entryOrderId:
+          type: string
+        entryStatus:
+          type: string
+        exitOrderId:
+          type: ["string", "null"]
+        exitStatus:
+          type: string
+        at:
+          type: string
+        message:
+          type: string
+      required: [symbol, quantity, entryOrderId, entryStatus, exitOrderId, exitStatus, at, message]
     FlattenResult:
       type: object
       properties:

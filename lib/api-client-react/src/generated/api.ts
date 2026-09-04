@@ -36,6 +36,8 @@ import type {
   StartAgentInput,
   StrategyRunResult,
   SymbolSnapshot,
+  TestTradeInput,
+  TestTradeResult,
   TradableAsset
 } from './api.schemas';
 
@@ -442,6 +444,78 @@ export const useStopAgent = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getStopAgentMutationOptions(options));
+    }
+
+export const getTestPaperRoundTripUrl = () => {
+
+
+
+
+  return `/api/agent/test-trade`
+}
+
+/**
+ * Opens one small paper position, waits for the entry to fill, and immediately submits a market close. This never uses live trading.
+ * @summary Run a temporary paper round trip
+ */
+export const testPaperRoundTrip = async (testTradeInput?: TestTradeInput, options?: Parameters<typeof customFetch>[1]): Promise<TestTradeResult> => {
+
+  return customFetch<TestTradeResult>(getTestPaperRoundTripUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(testTradeInput)
+  }
+);}
+
+
+
+
+
+export const getTestPaperRoundTripMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof testPaperRoundTrip>>, TError,{data?: BodyType<TestTradeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof testPaperRoundTrip>>, TError,{data?: BodyType<TestTradeInput>}, TContext> => {
+
+const mutationKey = ['testPaperRoundTrip'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof testPaperRoundTrip>>, {data?: BodyType<TestTradeInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  testPaperRoundTrip(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type TestPaperRoundTripMutationResult = NonNullable<Awaited<ReturnType<typeof testPaperRoundTrip>>>
+    export type TestPaperRoundTripMutationBody = BodyType<TestTradeInput> | undefined
+    export type TestPaperRoundTripMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Run a temporary paper round trip
+ */
+export const useTestPaperRoundTrip = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof testPaperRoundTrip>>, TError,{data?: BodyType<TestTradeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof testPaperRoundTrip>>,
+        TError,
+        {data?: BodyType<TestTradeInput>},
+        TContext
+      > => {
+      return useMutation(getTestPaperRoundTripMutationOptions(options));
     }
 
 export const getGetAgentAssetsUrl = (params?: GetAgentAssetsParams,) => {

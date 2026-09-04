@@ -50,6 +50,7 @@ import {
   useRunStrategy,
   useStartAgent,
   useStopAgent,
+  useTestPaperRoundTrip,
 } from '@workspace/api-client-react';
 import type {
   AgentDashboard,
@@ -528,6 +529,7 @@ function DashboardPage() {
   const runStrategy = useRunStrategy();
   const start = useStartAgent();
   const stop = useStopAgent();
+  const testTrade = useTestPaperRoundTrip();
   const flatten = useFlattenAgentPositions();
   const [selectedSymbol, setSelectedSymbol] = useState('');
   const [dryRun, setDryRun] = useState(false);
@@ -583,13 +585,24 @@ function DashboardPage() {
       onError: () => setNotice('The automated agent could not stop. Review the API server and retry.'),
     });
   };
+  const runRoundTripTest = () => {
+    setNotice('');
+    testTrade.mutate({ data: { symbol: 'MC', quantity: 1 } }, {
+      onSuccess: (result) => {
+        setNotice(`${result.message} Entry ${result.entryStatus}; close ${result.exitStatus}.`);
+        queryClient.invalidateQueries({ queryKey: getGetAgentDashboardQueryKey() });
+        queryClient.invalidateQueries({ queryKey: getGetAgentAccountQueryKey() });
+      },
+      onError: () => setNotice('The MC round-trip test could not run. Stop the agent and retry during regular U.S. market hours.'),
+    });
+  };
   return (
     <>
       <PageIntro
         eyebrow="Live agent / control room"
         title="Good decisions leave a trail."
         description="See what the agent sees, why it waits, and where every paper order came from."
-        action={<div className="flex items-center gap-2"><label className="dry-run-toggle"><input type="checkbox" checked={dryRun} onChange={(event) => setDryRun(event.target.checked)} data-testid="input-dry-run" /><span className="toggle-track" /><span>Preview only</span></label><button className="button button-primary" onClick={runScan} disabled={runStrategy.isPending || dashboardQuery.isLoading} data-testid="button-run-scan">{runStrategy.isPending ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />} Run scan</button></div>}
+        action={<div className="flex flex-wrap items-center justify-end gap-2"><label className="dry-run-toggle"><input type="checkbox" checked={dryRun} onChange={(event) => setDryRun(event.target.checked)} data-testid="input-dry-run" /><span className="toggle-track" /><span>Preview only</span></label><button className="button button-secondary" onClick={runRoundTripTest} disabled={testTrade.isPending || dashboardQuery.isLoading || dashboard?.status.running} data-testid="button-test-paper-round-trip">{testTrade.isPending ? <RefreshCw size={14} className="animate-spin" /> : <Zap size={14} />} Test MC round trip</button><button className="button button-primary" onClick={runScan} disabled={runStrategy.isPending || dashboardQuery.isLoading} data-testid="button-run-scan">{runStrategy.isPending ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />} Run scan</button></div>}
       />
       {notice && <div className="notice-banner" data-testid="status-action-notice"><Info size={14} /><span>{notice}</span><button onClick={() => setNotice('')} aria-label="Dismiss notice" data-testid="button-dismiss-notice"><X size={14} /></button></div>}
       {dashboardQuery.isLoading ? <LoadingPanel rows={6} /> : dashboardQuery.isError || !dashboard ? <ErrorPanel onRetry={() => dashboardQuery.refetch()} /> : (
