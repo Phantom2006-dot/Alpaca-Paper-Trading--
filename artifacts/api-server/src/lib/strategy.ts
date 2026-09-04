@@ -12,6 +12,7 @@ import {
   OptimizeBacktestResponse,
   GetAgentAssetsResponse,
   GetAgentAccountResponse,
+  StartAgentResponse,
 } from "@workspace/api-zod";
 
 type Bar = {
@@ -66,6 +67,15 @@ let activities: Activity[] = [];
 const demoPositions = new Map<string, Position>();
 const trailingExtremes = new Map<string, number>();
 const DEFAULT_BACKTEST_DAYS = 180;
+const DEFAULT_INTERVAL_SECONDS = 300;
+let agentTimer: ReturnType<typeof setInterval> | null = null;
+let agentRunning = false;
+let agentIntervalSeconds = DEFAULT_INTERVAL_SECONDS;
+let agentNextRunAt: string | null = null;
+let agentLastError: string | null = null;
+let agentSymbols = [...DEFAULT_SYMBOLS];
+let agentRules: StrategyRules = guardrails;
+let scheduledRunInFlight = false;
 
 function hasCredentials(): boolean {
   return Boolean(
@@ -229,6 +239,12 @@ async function fetchBars(
     low: toNumber(bar.l),
     volume: toNumber(bar.v),
   }));
+}
+
+async function marketIsOpen(): Promise<boolean> {
+  if (!hasCredentials()) return false;
+  const clock = await alpacaRequest<{ is_open: boolean }>("/v2/clock");
+  return clock.is_open;
 }
 
 async function fetchHistoricalBars(
@@ -596,21 +612,28 @@ export async function getStatus() {
     connected,
     paper: true,
     lastRunAt,
-    nextRunAt: lastRunAt
-      ? new Date(new Date(lastRunAt).getTime() + 5 * 60_000).toISOString()
-      : null,
-    symbols: DEFAULT_SYMBOLS,
+    nextRunAt: agentNextRunAt,
+    running: agentRunning,
+    intervalSeconds: agentIntervalSeconds,
+    lastError: agentLastError,
+    symbols: agentSymbols,
     heartbeat: new Date().toISOString(),
-    guardrails,
+    guardrails: agentRules,
   });
 }
 
 export async function getDashboard(log: Logger) {
   const [account, positions] = await Promise.all([fetchAccount(), fetchPositions()]);
   const snapshots = await Promise.all(
-    DEFAULT_SYMBOLS.map(async (symbol) => {
+    agentSymbols.map(async (symbol) => {
       const bars = await fetchBars(symbol);
-      return snapshotFromBars(symbol, bars, positionFor(positions, symbol));
+      return snapshotFromBars(
+        symbol,
+        bars,
+        positionFor(positions, symbol),
+        trailingExtremes,
+        agentRules,
+      );
     }),
   );
   const status = await getStatus();
@@ -637,7 +660,20 @@ export async function runStrategy(
   rules: StrategyRules = guardrails,
 ) {
   const selectedSymbols = [...new Set(symbols.map((symbol) => symbol.trim().toUpperCase()).filter(Boolean))].slice(0, 8);
-  const [account, positions] = await Promise.all([fetchAccount(), fetchPositions()]);
+  const [account, positions, orders] = await Promise.all([
+    fetchAccount(),
+    fetchPositions(),
+    fetchOrders(),
+  ]);
+  const pendingOrderSymbols = new Set(
+    orders
+      .filter((order) =>
+        ["new", "accepted", "pending_new", "partially_filled"].includes(
+          order.status.toLowerCase(),
+        ),
+      )
+      .map((order) => order.symbol),
+  );
   const snapshots = await Promise.all(
     selectedSymbols.map(async (symbol) => {
       const bars = await fetchBars(symbol);
@@ -656,6 +692,18 @@ export async function runStrategy(
             symbol: snapshot.symbol,
             zScore: snapshot.zScore,
             reason: "An open position already exists; the inventory check prevented stacking risk.",
+            orderId: null,
+            status: "blocked",
+          }),
+        );
+      } else if (pendingOrderSymbols.has(snapshot.symbol)) {
+        actions.push(
+          addActivity({
+            at: new Date().toISOString(),
+            action: "PENDING ORDER BLOCKED",
+            symbol: snapshot.symbol,
+            zScore: snapshot.zScore,
+            reason: "An open paper order already exists; the agent will wait for it to resolve before evaluating a new entry.",
             orderId: null,
             status: "blocked",
           }),
@@ -704,6 +752,98 @@ export async function runStrategy(
     evaluated: snapshots.length,
     actions,
     snapshots,
+  });
+}
+
+async function executeScheduledRun(log: Logger): Promise<void> {
+  if (!agentRunning || scheduledRunInFlight) return;
+  scheduledRunInFlight = true;
+  try {
+    if (!(await marketIsOpen())) {
+      agentLastError = null;
+      log.info({ nextRunAt: agentNextRunAt }, "Continuous agent waiting for market open");
+      return;
+    }
+    await runStrategy(agentSymbols, false, log, agentRules);
+    agentLastError = null;
+  } catch (error) {
+    agentLastError = error instanceof Error ? error.message : "Scheduled strategy scan failed";
+    log.error({ err: error }, "Scheduled strategy scan failed; agent remains running");
+  } finally {
+    scheduledRunInFlight = false;
+    if (agentRunning) {
+      agentNextRunAt = new Date(
+        Date.now() + agentIntervalSeconds * 1000,
+      ).toISOString();
+    }
+  }
+}
+
+function normalizeSymbols(symbols?: string[]): string[] {
+  const normalized = [
+    ...new Set(
+      (symbols ?? DEFAULT_SYMBOLS)
+        .map((symbol) => symbol.trim().toUpperCase())
+        .filter(Boolean),
+    ),
+  ].slice(0, 8);
+  if (!normalized.length) throw new Error("At least one symbol is required to start the agent.");
+  return normalized;
+}
+
+export async function startAgent(
+  symbols: string[] | undefined,
+  intervalSeconds: number | undefined,
+  settings: Partial<StrategyRules> | undefined,
+  log: Logger,
+) {
+  if (!hasCredentials()) {
+    throw new Error("Alpaca paper credentials are required before starting automated execution.");
+  }
+  if (!(await credentialsWork())) {
+    throw new Error("The Alpaca paper account could not be verified. Automated execution was not started.");
+  }
+  if (intervalSeconds !== undefined && !Number.isInteger(intervalSeconds)) {
+    throw new Error("The agent interval must be a whole number of seconds.");
+  }
+
+  agentSymbols = normalizeSymbols(symbols);
+  agentIntervalSeconds = intervalSeconds ?? DEFAULT_INTERVAL_SECONDS;
+  if (agentIntervalSeconds < 60 || agentIntervalSeconds > 3600) {
+    throw new Error("The agent interval must be between 60 and 3600 seconds.");
+  }
+  agentRules = { ...guardrails, ...(settings ?? {}) };
+  agentRunning = true;
+  agentLastError = null;
+  agentNextRunAt = new Date(
+    Date.now() + agentIntervalSeconds * 1000,
+  ).toISOString();
+  if (agentTimer) clearInterval(agentTimer);
+  agentTimer = setInterval(() => {
+    void executeScheduledRun(log);
+  }, agentIntervalSeconds * 1000);
+
+  await executeScheduledRun(log);
+  log.info(
+    { symbols: agentSymbols, intervalSeconds: agentIntervalSeconds },
+    "Continuous paper agent started",
+  );
+  return StartAgentResponse.parse({
+    status: await getStatus(),
+    message: `Agent started. It will scan ${agentSymbols.length} symbol${agentSymbols.length === 1 ? "" : "s"} every ${agentIntervalSeconds} seconds while the market is open.`,
+  });
+}
+
+export async function stopAgent(log: Logger) {
+  if (agentTimer) clearInterval(agentTimer);
+  agentTimer = null;
+  agentRunning = false;
+  agentNextRunAt = null;
+  scheduledRunInFlight = false;
+  log.info("Continuous paper agent stopped; open positions were left unchanged");
+  return StartAgentResponse.parse({
+    status: await getStatus(),
+    message: "Agent stopped. Existing paper positions remain open until you flatten or the agent is started again.",
   });
 }
 

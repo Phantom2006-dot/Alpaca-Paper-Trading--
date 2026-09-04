@@ -28,6 +28,9 @@ export const GetAgentDashboardResponse = zod.object({
   "paper": zod.boolean(),
   "lastRunAt": zod.string().nullable(),
   "nextRunAt": zod.string().nullable(),
+  "running": zod.boolean(),
+  "intervalSeconds": zod.number(),
+  "lastError": zod.string().nullable(),
   "symbols": zod.array(zod.string()),
   "heartbeat": zod.string(),
   "guardrails": zod.object({
@@ -102,6 +105,9 @@ export const GetAgentStatusResponse = zod.object({
   "paper": zod.boolean(),
   "lastRunAt": zod.string().nullable(),
   "nextRunAt": zod.string().nullable(),
+  "running": zod.boolean(),
+  "intervalSeconds": zod.number(),
+  "lastError": zod.string().nullable(),
   "symbols": zod.array(zod.string()),
   "heartbeat": zod.string(),
   "guardrails": zod.object({
@@ -118,6 +124,94 @@ export const GetAgentStatusResponse = zod.object({
   "adxMax": zod.number(),
   "minVolumeRatio": zod.number()
 })
+})
+
+
+/**
+ * Starts the server-side strategy loop, runs an immediate paper scan, and continues on the configured cadence.
+ * @summary Start continuous paper execution
+ */
+
+export const startAgentBodySymbolsMax = 8;
+
+export const startAgentBodyIntervalSecondsMin = 60;
+export const startAgentBodyIntervalSecondsMax = 3600;
+
+
+
+export const StartAgentBody = zod.object({
+  "symbols": zod.array(zod.string().min(1)).min(1).max(startAgentBodySymbolsMax).optional(),
+  "intervalSeconds": zod.number().min(startAgentBodyIntervalSecondsMin).max(startAgentBodyIntervalSecondsMax).optional(),
+  "settings": zod.object({
+  "entryZ": zod.number(),
+  "adxMax": zod.number(),
+  "minVolumeRatio": zod.number()
+}).optional()
+})
+
+export const StartAgentResponse = zod.object({
+  "status": zod.object({
+  "mode": zod.enum(['paper', 'demo']),
+  "connected": zod.boolean(),
+  "paper": zod.boolean(),
+  "lastRunAt": zod.string().nullable(),
+  "nextRunAt": zod.string().nullable(),
+  "running": zod.boolean(),
+  "intervalSeconds": zod.number(),
+  "lastError": zod.string().nullable(),
+  "symbols": zod.array(zod.string()),
+  "heartbeat": zod.string(),
+  "guardrails": zod.object({
+  "volumeFilter": zod.boolean(),
+  "adxFilter": zod.boolean(),
+  "hardInvalidation": zod.boolean(),
+  "trailingStop": zod.boolean(),
+  "duplicatePositionCheck": zod.boolean(),
+  "paperOnly": zod.boolean(),
+  "entryZ": zod.number(),
+  "exitZ": zod.number(),
+  "invalidationZ": zod.number(),
+  "maxPositionPct": zod.number(),
+  "adxMax": zod.number(),
+  "minVolumeRatio": zod.number()
+})
+}),
+  "message": zod.string()
+})
+
+
+/**
+ * Stops future scheduled scans without closing existing paper positions.
+ * @summary Stop continuous paper execution
+ */
+export const StopAgentResponse = zod.object({
+  "status": zod.object({
+  "mode": zod.enum(['paper', 'demo']),
+  "connected": zod.boolean(),
+  "paper": zod.boolean(),
+  "lastRunAt": zod.string().nullable(),
+  "nextRunAt": zod.string().nullable(),
+  "running": zod.boolean(),
+  "intervalSeconds": zod.number(),
+  "lastError": zod.string().nullable(),
+  "symbols": zod.array(zod.string()),
+  "heartbeat": zod.string(),
+  "guardrails": zod.object({
+  "volumeFilter": zod.boolean(),
+  "adxFilter": zod.boolean(),
+  "hardInvalidation": zod.boolean(),
+  "trailingStop": zod.boolean(),
+  "duplicatePositionCheck": zod.boolean(),
+  "paperOnly": zod.boolean(),
+  "entryZ": zod.number(),
+  "exitZ": zod.number(),
+  "invalidationZ": zod.number(),
+  "maxPositionPct": zod.number(),
+  "adxMax": zod.number(),
+  "minVolumeRatio": zod.number()
+})
+}),
+  "message": zod.string()
 })
 
 

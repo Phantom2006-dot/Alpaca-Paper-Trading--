@@ -6,6 +6,7 @@ import {
   RunBacktestBody,
   RunStrategyBody,
   GetAgentAssetsQueryParams,
+  StartAgentBody,
 } from "@workspace/api-zod";
 
 import {
@@ -19,6 +20,8 @@ import {
   optimizeBacktest,
   runBacktest,
   runStrategy,
+  startAgent,
+  stopAgent,
 } from "../lib/strategy";
 
 const router: IRouter = Router();
@@ -34,6 +37,41 @@ router.get("/agent/dashboard", async (req, res): Promise<void> => {
 
 router.get("/agent/status", async (req, res): Promise<void> => {
   res.json(await getStatus());
+});
+
+router.post("/agent/start", async (req, res): Promise<void> => {
+  const parsed = StartAgentBody.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    req.log.warn({ errors: parsed.error.message }, "Invalid agent start input");
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  try {
+    res.json(
+      await startAgent(
+        parsed.data.symbols,
+        parsed.data.intervalSeconds,
+        parsed.data.settings,
+        req.log,
+      ),
+    );
+  } catch (error) {
+    req.log.error({ err: error }, "Continuous agent start failed");
+    res.status(409).json({
+      error: error instanceof Error ? error.message : "Continuous agent could not start",
+    });
+  }
+});
+
+router.post("/agent/stop", async (req, res): Promise<void> => {
+  try {
+    res.json(await stopAgent(req.log));
+  } catch (error) {
+    req.log.error({ err: error }, "Continuous agent stop failed");
+    res.status(502).json({
+      error: error instanceof Error ? error.message : "Continuous agent could not stop",
+    });
+  }
 });
 
 router.get("/agent/assets", async (req, res): Promise<void> => {

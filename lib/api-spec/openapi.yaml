@@ -51,6 +51,44 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AgentStatus"
+  /agent/start:
+    post:
+      operationId: startAgent
+      tags: [agent]
+      summary: Start continuous paper execution
+      description: Starts the server-side strategy loop, runs an immediate paper scan, and continues on the configured cadence.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartAgentInput"
+      responses:
+        "200":
+          description: Agent started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentControlResult"
+        "409":
+          description: Paper account unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /agent/stop:
+    post:
+      operationId: stopAgent
+      tags: [agent]
+      summary: Stop continuous paper execution
+      description: Stops future scheduled scans without closing existing paper positions.
+      responses:
+        "200":
+          description: Agent stopped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentControlResult"
   /agent/assets:
     get:
       operationId: getAgentAssets
@@ -575,6 +613,12 @@ components:
           type: ["string", "null"]
         nextRunAt:
           type: ["string", "null"]
+        running:
+          type: boolean
+        intervalSeconds:
+          type: number
+        lastError:
+          type: ["string", "null"]
         symbols:
           type: array
           items:
@@ -583,7 +627,7 @@ components:
           type: string
         guardrails:
           $ref: "#/components/schemas/GuardrailState"
-      required: [mode, connected, paper, lastRunAt, nextRunAt, symbols, heartbeat, guardrails]
+      required: [mode, connected, paper, lastRunAt, nextRunAt, running, intervalSeconds, lastError, symbols, heartbeat, guardrails]
     SymbolSnapshot:
       type: object
       properties:
@@ -724,6 +768,30 @@ components:
           items:
             $ref: "#/components/schemas/SymbolSnapshot"
       required: [ranAt, mode, evaluated, actions, snapshots]
+    StartAgentInput:
+      type: object
+      properties:
+        symbols:
+          type: array
+          items:
+            type: string
+            minLength: 1
+          minItems: 1
+          maxItems: 8
+        intervalSeconds:
+          type: number
+          minimum: 60
+          maximum: 3600
+        settings:
+          $ref: "#/components/schemas/OptimizationSettings"
+    AgentControlResult:
+      type: object
+      properties:
+        status:
+          $ref: "#/components/schemas/AgentStatus"
+        message:
+          type: string
+      required: [status, message]
     FlattenResult:
       type: object
       properties:

@@ -4,12 +4,16 @@ An explainable AI-assisted Alpaca paper-trading agent that researches, scans, an
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- Use the managed workflows `artifacts/api-server: API Server` and `artifacts/alpaca-agent: web` to run the API and cockpit preview together.
+- `pnpm --filter @workspace/api-server run dev` — run the API server locally (managed port 8080)
+- `pnpm --filter @workspace/alpaca-agent run dev` — run the cockpit locally (managed port 24492)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- Required env: `DATABASE_URL`, `ALPACA_API_KEY`, and `ALPACA_API_SECRET` — the Alpaca credentials must be for a paper account.
+
+The control room can start and stop the continuous paper agent. Starting runs an immediate scan when the market is open, then evaluates the configured symbols on the selected cadence. Stopping cancels future scans without flattening existing positions; use the separate Flatten control for that.
 
 ## Stack
 
@@ -22,7 +26,11 @@ An explainable AI-assisted Alpaca paper-trading agent that researches, scans, an
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/alpaca-agent` — React/Vite operator cockpit and paper-agent controls.
+- `artifacts/api-server/src/lib/strategy.ts` — strategy indicators, guardrails, paper execution, and continuous scheduler.
+- `artifacts/api-server/src/routes/agent.ts` — agent, account, scan, and continuous-control routes.
+- `lib/api-spec/openapi.yaml` — source of truth for API contracts.
+- `lib/db/src/schema` — database schema source.
 
 ## Architecture decisions
 
