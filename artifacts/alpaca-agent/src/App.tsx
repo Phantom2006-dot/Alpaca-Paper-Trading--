@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -85,6 +85,8 @@ import { ArchitecturePage } from '@/pages/ArchitecturePage';
 import { TradesPage } from '@/pages/TradesPage';
 import { KillSwitchModal } from '@/components/KillSwitchModal';
 import { useAuth, useClerk, UserButton } from '@clerk/react';
+
+const hasClerk = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
 import { CredentialsPage } from '@/pages/CredentialsPage';
 
 const queryClient = new QueryClient();
@@ -1166,6 +1168,41 @@ function TickerBar() {
   );
 }
 
+function LaunchAppAction({ className, children = 'Launch App' }: { className: string; children?: ReactNode }) {
+  if (!hasClerk) {
+    return <Link href="/dashboard" className={className}>{children} <ArrowRight size={14} /></Link>;
+  }
+  return <AuthenticatedLaunchAction className={className}>{children}</AuthenticatedLaunchAction>;
+}
+
+function AuthenticatedLaunchAction({ className, children }: { className: string; children: ReactNode }) {
+  const { isSignedIn } = useAuth();
+  const { openSignIn } = useClerk();
+  const [, setLocation] = useLocation();
+  const [launchRequested, setLaunchRequested] = useState(false);
+
+  useEffect(() => {
+    if (launchRequested && isSignedIn) setLocation('/dashboard');
+  }, [isSignedIn, launchRequested, setLocation]);
+
+  return (
+    <button
+      type="button"
+      className={className}
+      onClick={() => {
+        setLaunchRequested(true);
+        if (isSignedIn) {
+          setLocation('/dashboard');
+        } else {
+          openSignIn({});
+        }
+      }}
+    >
+      {children} <ArrowRight size={14} />
+    </button>
+  );
+}
+
 function LandingNav() {
   return (
     <nav className="landing-nav">
@@ -1179,9 +1216,7 @@ function LandingNav() {
           <a href="#how-it-works">How it works</a>
           <a href="#pricing">Pricing</a>
         </div>
-        <Link href="/dashboard" className="button button-primary landing-cta-btn">
-          Launch App <ArrowRight size={14} />
-        </Link>
+        <LaunchAppAction className="button button-primary landing-cta-btn" />
       </div>
     </nav>
   );
@@ -1204,9 +1239,7 @@ function HeroSection() {
           Every decision is logged, every guardrail is visible, every order is explained.
         </motion.p>
         <motion.div variants={fadeUp} className="landing-hero-actions">
-          <Link href="/dashboard" className="button button-primary landing-hero-btn">
-            <Rocket size={15} /> Start for free
-          </Link>
+          <LaunchAppAction className="button button-primary landing-hero-btn"><Rocket size={15} /> Start for free</LaunchAppAction>
           <a href="#how-it-works" className="button button-secondary landing-hero-btn">
             See how it works
           </a>
@@ -1465,16 +1498,12 @@ function NotFound() {
   return <div className="panel mx-auto mt-16 max-w-lg p-10 text-center"><div className="eyebrow">404 / off course</div><h1 className="mt-3 font-display text-3xl font-bold">This coordinate is not mapped.</h1><p className="mt-3 text-sm text-muted-foreground">Return to the control room to continue.</p><Link href="/dashboard" className="button button-primary mt-6" data-testid="link-not-found-home">Back to control room</Link></div>;
 }
 
-function Router() {
+function AuthenticatedRouter() {
   const { isSignedIn } = useAuth();
-
   return (
-    <ErrorBoundary>
-      <Switch>
-        <Route path="/" component={LandingPage} />
-        <Route>
-          {isSignedIn ? <Shell>
-            <Switch>
+    <Route>
+      {isSignedIn ? <Shell>
+        <Switch>
               <Route path="/dashboard" component={DashboardPage} />
               <Route path="/console" component={ConsolePage} />
               <Route path="/trades" component={TradesPage} />
@@ -1488,9 +1517,18 @@ function Router() {
               <Route path="/account" component={AccountPage} />
               <Route path="/credentials" component={CredentialsPage} />
               <Route component={NotFound} />
-            </Switch>
-          </Shell> : <LandingPage />}
-        </Route>
+        </Switch>
+      </Shell> : <LandingPage />}
+    </Route>
+  );
+}
+
+function Router() {
+  return (
+    <ErrorBoundary>
+      <Switch>
+        <Route path="/" component={LandingPage} />
+        {hasClerk ? <AuthenticatedRouter /> : <Route component={LandingPage} />}
       </Switch>
     </ErrorBoundary>
   );

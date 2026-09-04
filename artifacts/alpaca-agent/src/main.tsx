@@ -6,8 +6,11 @@ import { ErrorBoundary } from '@/components/error-boundary';
 
 import './index.css';
 
-const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string;
-if (!publishableKey) throw new Error('VITE_CLERK_PUBLISHABLE_KEY is not set');
+const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
+
+if (!publishableKey) {
+  console.warn('VITE_CLERK_PUBLISHABLE_KEY is not set — running without authentication');
+}
 
 createRoot(document.getElementById('root')!, {
   onCaughtError: (error, errorInfo) => {
@@ -15,8 +18,12 @@ createRoot(document.getElementById('root')!, {
   },
 }).render(
   <ErrorBoundary>
-    <ClerkProvider publishableKey={publishableKey} afterSignOutUrl="/">
+    {publishableKey ? (
+      <ClerkProvider publishableKey={publishableKey} afterSignOutUrl="/">
+        <App />
+      </ClerkProvider>
+    ) : (
       <App />
-    </ClerkProvider>
+    )}
   </ErrorBoundary>,
 );
