@@ -9,7 +9,7 @@ Kairo is an explainable, paper-only AI trading agent built on Alpaca Markets. It
 Kairo has two linked user experiences:
 
 1. **Kairo web cockpit** - an authenticated React/Vite operator workspace for dashboard monitoring, strategy research, backtesting, paper execution, risk controls, credentials, and audit review.
-2. **Telegram Minisbot** - a conversational alternative for users who prefer Telegram: https://minis-yzdb.onrender.com
+2. **Telegram bot** - a conversational alternative for users who prefer Telegram: https://t.me/Superrhhbot
 
 The web app and Telegram are two access channels for the same product direction. Telegram should be presented as an alternate way to interact with the agent, not as a separate live brokerage or a replacement for the web risk controls.
 
@@ -34,7 +34,7 @@ Explain that Kairo is a paper-only AI trading agent built on Alpaca Markets. Its
 Present the product as two connected channels:
 
 - The authenticated Kairo web cockpit at `/`, with the dashboard at `/dashboard`.
-- The linked Telegram Minisbot web experience at https://minis-yzdb.onrender.com for conversational access.
+- The linked Telegram bot at https://t.me/Superrhhbot for conversational access.
 
 Show a clear user journey: discover Kairo on the public landing page, choose Launch App or Start for free, authenticate with Clerk, arrive at the dashboard, configure paper credentials if needed, research or run a strategy, inspect risk gates, and review the audit trail. Show Telegram as an alternate entry point for users who want to interact conversationally.
 
@@ -74,7 +74,7 @@ Use diagrams for flow and architecture rather than dense paragraphs. Use a small
 
 ## Speaker notes prompt
 
-For every slide, add speaker notes containing: the main point in one sentence, a 30-60 second explanation, one product fact supporting the claim, and one sentence clarifying that Kairo is paper-only. For the Telegram slide, mention https://minis-yzdb.onrender.com exactly and explain that it is the alternate conversational channel linked to the web product.
+For every slide, add speaker notes containing: the main point in one sentence, a 30-60 second explanation, one product fact supporting the claim, and one sentence clarifying that Kairo is paper-only. For the Telegram slide, mention https://t.me/Superrhhbot exactly and explain that it is the alternate conversational channel linked to the web product.
 
 ## Demo presentation variant
 
@@ -85,7 +85,7 @@ Create a 7-slide live demo deck:
 3. Clerk authentication and dashboard arrival.
 4. Credentials page and user-scoped paper credential handling.
 5. Console seven-step decision pipeline.
-6. Telegram alternative at https://minis-yzdb.onrender.com.
+6. Telegram alternative at https://t.me/Superrhhbot.
 7. Risk controls, audit trail, and closing takeaway.
 
 Keep the demo narrative chronological. Never display real API keys, secrets, account numbers, or private user data in screenshots.
@@ -95,7 +95,7 @@ Keep the demo narrative chronological. Never display real API keys, secrets, acc
 Before accepting the generated presentation, confirm that:
 
 - The web app and Telegram are both included and clearly linked conceptually.
-- The Telegram URL is exactly https://minis-yzdb.onrender.com.
+- The Telegram URL is exactly https://t.me/Superrhhbot.
 - Launch App and Start for free are described as authentication-aware actions.
 - The public `/` landing page is distinguished from the authenticated `/dashboard`.
 - Paper-only execution is visible on the title, safety, and closing slides.

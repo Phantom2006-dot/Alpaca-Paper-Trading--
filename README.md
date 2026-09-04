@@ -5,7 +5,7 @@ An explainable, paper-only AI trading cockpit built on Alpaca Markets. Kairo sca
 Kairo has two linked entry points:
 
 - **Web cockpit:** authenticated research, strategy, risk, paper execution, credentials, and audit workspace.
-- **Telegram channel:** the linked Minisbot experience at <https://minis-yzdb.onrender.com> for users who prefer a conversational workflow.
+- **Telegram bot:** <https://t.me/Superrhhbot> for users who prefer a conversational workflow.
 
 Users can choose either channel. The web Launch App and Start for free actions open authentication first, then route a successfully authenticated user to `/dashboard`. Telegram is an alternate interface and does not enable live trading.
 

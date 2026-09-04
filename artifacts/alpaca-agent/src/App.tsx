@@ -88,7 +88,7 @@ import { KillSwitchModal } from '@/components/KillSwitchModal';
 import { useAuth, useClerk, UserButton } from '@clerk/react';
 
 const hasClerk = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
-const TELEGRAM_BOT_URL = 'https://minis-yzdb.onrender.com';
+const TELEGRAM_BOT_URL = 'https://t.me/Superrhhbot';
 import { CredentialsPage } from '@/pages/CredentialsPage';
 
 const queryClient = new QueryClient();
