@@ -1,17 +1,14 @@
-modules = ["nodejs-20", "web", "bash"]
+modules = ["nodejs-20", "web", "bash", "postgresql-16", "python-base-3.13"]
 
 [deployment]
 router = "application"
-deploymentTarget = "autoscale"
-
-[deployment.postBuild]
-args = ["pnpm", "store", "prune"]
-env = { "CI" = "true" }
+builds = ["artifacts/api-server"]
 
 [workflows]
 
-[agent]
+[Agent]
 stack = "PNPM_WORKSPACE"
+command = "pnpm run typecheck"
 expertMode = true
 
 [postMerge]
