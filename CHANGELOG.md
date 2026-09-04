@@ -4,6 +4,23 @@ All completed work is recorded here after every prompt request.
 
 ---
 
+## [Session 6] — Route Restructure: / → Landing, /dashboard → App
+
+### Completed
+- `/` now renders `LandingPage` (standalone, no Shell)
+- `/dashboard` now renders `DashboardPage` inside Shell
+- All internal nav, logo, back-links, pricing CTAs, landing hero/footer updated to `/dashboard`
+- Activity feed "View audit" link corrected from `/activity` to `/audit`
+- `vite.config.ts` replaced with clean local config (removed Replit-specific `PORT`/`BASE_PATH` env guards and Replit plugins)
+- Missing Windows native binaries manually installed: `@rollup/rollup-win32-x64-msvc`, `lightningcss-win32-x64-msvc`, `@tailwindcss/oxide-win32-x64-msvc`
+- TypeScript typecheck: clean (exit 0)
+
+### Files modified
+- `artifacts/alpaca-agent/src/App.tsx` — Router restructure, all href updates
+- `artifacts/alpaca-agent/vite.config.ts` — replaced with clean local config
+
+---
+
 ## [Session 5] — Full Hackathon UI Implementation
 
 ### Completed

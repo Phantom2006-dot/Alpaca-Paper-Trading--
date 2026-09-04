@@ -86,7 +86,7 @@ import { KillSwitchModal } from '@/components/KillSwitchModal';
 const queryClient = new QueryClient();
 
 const navItems = [
-  { href: '/', label: 'Dashboard', short: 'DASH', icon: LayoutDashboard },
+  { href: '/dashboard', label: 'Dashboard', short: 'DASH', icon: LayoutDashboard },
   { href: '/console', label: 'AI Console', short: 'CONSOLE', icon: BrainCircuit },
   { href: '/strategy', label: 'Strategy logic', short: 'LOGIC', icon: SlidersHorizontal },
   { href: '/backtest', label: 'Backtester', short: 'TEST', icon: Database },
@@ -208,7 +208,7 @@ function Shell({ children }: { children: ReactNode }) {
       )}
       <aside className={cx('app-sidebar', mobileNav && 'is-open')}>
         <div className="flex items-center justify-between px-5 py-5 lg:block lg:px-7 lg:py-7">
-          <Link href="/" className="inline-flex" data-testid="link-sidebar-logo">
+          <Link href="/dashboard" className="inline-flex" data-testid="link-sidebar-logo">
             <AppLogo />
           </Link>
           <button className="mobile-menu-button" onClick={() => setMobileNav(false)} data-testid="button-close-navigation">
@@ -263,7 +263,7 @@ function Shell({ children }: { children: ReactNode }) {
             <div className="topbar-breadcrumb">
               <span>ALPACA AGENT</span>
               <ChevronRight size={12} />
-              <strong>{navItems.find((item) => item.href === location)?.short ?? 'DASH'}</strong>
+              <strong>{navItems.find((item) => item.href === location)?.short ?? (location === '/dashboard' ? 'DASH' : 'DASH')}</strong>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -723,7 +723,7 @@ function DashboardPage() {
               onIntervalChange={setIntervalSeconds}
             />
             <div className="panel activity-panel">
-              <CardHeader eyebrow="03 / event stream" title="Recent decisions" action={<Link href="/activity" className="text-link" data-testid="link-view-all-activity">View audit <ChevronRight size={13} /></Link>} />
+              <CardHeader eyebrow="03 / event stream" title="Recent decisions" action={<Link href="/audit" className="text-link" data-testid="link-view-all-activity">View audit <ChevronRight size={13} /></Link>} />
               <ActivityList activity={dashboard.activity} compact />
             </div>
           </div>
@@ -744,7 +744,7 @@ function StrategyPage() {
   const status = statusQuery.data;
   return (
     <>
-      <PageIntro eyebrow="Strategy / explainability" title="The logic is the product." description="A mean-reversion playbook with explicit gates. Nothing enters the order lane without passing the trace." action={<Link href="/" className="button button-secondary" data-testid="link-back-control-room"><LayoutDashboard size={14} /> Control room</Link>} />
+      <PageIntro eyebrow="Strategy / explainability" title="The logic is the product." description="A mean-reversion playbook with explicit gates. Nothing enters the order lane without passing the trace." action={<Link href="/dashboard" className="button button-secondary" data-testid="link-back-control-room"><LayoutDashboard size={14} /> Control room</Link>} />
       {statusQuery.isLoading ? <LoadingPanel rows={7} /> : statusQuery.isError || !status ? <ErrorPanel onRetry={() => statusQuery.refetch()} /> : <StrategyContent guardrails={status.guardrails} symbols={status.symbols} />}
     </>
   );
@@ -996,7 +996,7 @@ function BacktestPage() {
 
   return (
     <>
-      <PageIntro eyebrow="Research / historical replay" title="Test the decision path." description="Choose the Alpaca universe, market-data feed, timeframe, and strategy thresholds. This is a read-only simulation: no orders are submitted." action={<Link href="/" className="button button-secondary" data-testid="link-back-control-room"><LayoutDashboard size={14} /> Control room</Link>} />
+      <PageIntro eyebrow="Research / historical replay" title="Test the decision path." description="Choose the Alpaca universe, market-data feed, timeframe, and strategy thresholds. This is a read-only simulation: no orders are submitted." action={<Link href="/dashboard" className="button button-secondary" data-testid="link-back-control-room"><LayoutDashboard size={14} /> Control room</Link>} />
       <div className="panel backtest-form" data-testid="panel-backtest-form">
         <CardHeader eyebrow="01 / test parameters" title="Choose a replay window" action={<div className="mode-pill is-paper"><span className="mode-pill-dot" /> Alpaca {feed.toUpperCase()} data</div>} />
         <div className="backtest-fields">
@@ -1152,7 +1152,7 @@ function LandingNav() {
   return (
     <nav className="landing-nav">
       <div className="landing-nav-inner">
-        <Link href="/landing" className="landing-logo">
+        <Link href="/" className="landing-logo">
           <div className="logo-mark" aria-hidden="true"><span /><span /><span /></div>
           <span>alpaca<strong>agent</strong></span>
         </Link>
@@ -1161,7 +1161,7 @@ function LandingNav() {
           <a href="#how-it-works">How it works</a>
           <a href="#pricing">Pricing</a>
         </div>
-        <Link href="/" className="button button-primary landing-cta-btn">
+        <Link href="/dashboard" className="button button-primary landing-cta-btn">
           Launch App <ArrowRight size={14} />
         </Link>
       </div>
@@ -1186,7 +1186,7 @@ function HeroSection() {
           Every decision is logged, every guardrail is visible, every order is explained.
         </motion.p>
         <motion.div variants={fadeUp} className="landing-hero-actions">
-          <Link href="/" className="button button-primary landing-hero-btn">
+          <Link href="/dashboard" className="button button-primary landing-hero-btn">
             <Rocket size={15} /> Start for free
           </Link>
           <a href="#how-it-works" className="button button-secondary landing-hero-btn">
@@ -1345,7 +1345,7 @@ const PLANS = [
     icon: Star,
     features: ['Z-score + ADX strategy', 'Demo mode (no API key needed)', 'Manual scan + one-shot run', 'Activity audit trail', '4 default symbols', 'Paper-only execution lock'],
     cta: 'Start free',
-    href: '/',
+    href: '/dashboard',
     highlight: false,
   },
   {
@@ -1356,7 +1356,7 @@ const PLANS = [
     icon: Zap,
     features: ['Everything in Free', 'ICT / HMM 5-cluster engine', 'Continuous automation loop', 'Historical backtest (180 days)', 'Strategy optimizer (72 candidates)', 'Up to 8 symbols', 'Priority support'],
     cta: 'Start Pro',
-    href: '/',
+    href: '/dashboard',
     highlight: true,
   },
   {
@@ -1367,7 +1367,7 @@ const PLANS = [
     icon: Building2,
     features: ['Everything in Pro', 'Multi-account management', 'Custom strategy modules', 'Dedicated infrastructure', 'SLA + uptime guarantee', 'Onboarding & training', 'API access'],
     cta: 'Contact us',
-    href: '/',
+    href: '/dashboard',
     highlight: false,
   },
 ];
@@ -1419,7 +1419,7 @@ function LandingFooter() {
           <a href="#features">Features</a>
           <a href="#how-it-works">How it works</a>
           <a href="#pricing">Pricing</a>
-          <Link href="/">Launch app</Link>
+          <Link href="/dashboard">Launch app</Link>
         </div>
         <div className="landing-footer-note">Paper trading only · No live order routing · Built on Alpaca Markets API</div>
       </div>
@@ -1444,18 +1444,18 @@ function LandingPage() {
 // ─── END LANDING PAGE ─────────────────────────────────────────────────────────
 
 function NotFound() {
-  return <div className="panel mx-auto mt-16 max-w-lg p-10 text-center"><div className="eyebrow">404 / off course</div><h1 className="mt-3 font-display text-3xl font-bold">This coordinate is not mapped.</h1><p className="mt-3 text-sm text-muted-foreground">Return to the control room to continue.</p><Link href="/" className="button button-primary mt-6" data-testid="link-not-found-home">Back to control room</Link></div>;
+  return <div className="panel mx-auto mt-16 max-w-lg p-10 text-center"><div className="eyebrow">404 / off course</div><h1 className="mt-3 font-display text-3xl font-bold">This coordinate is not mapped.</h1><p className="mt-3 text-sm text-muted-foreground">Return to the control room to continue.</p><Link href="/dashboard" className="button button-primary mt-6" data-testid="link-not-found-home">Back to control room</Link></div>;
 }
 
 function Router() {
   return (
     <ErrorBoundary>
       <Switch>
-        <Route path="/landing" component={LandingPage} />
+        <Route path="/" component={LandingPage} />
         <Route>
           <Shell>
             <Switch>
-              <Route path="/" component={DashboardPage} />
+              <Route path="/dashboard" component={DashboardPage} />
               <Route path="/console" component={ConsolePage} />
               <Route path="/strategy" component={StrategyPage} />
               <Route path="/backtest" component={BacktestPage} />
