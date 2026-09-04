@@ -26,9 +26,9 @@ import {
   runStrategy,
   startAgent,
   stopAgent,
-  setUserCredentials,
   validateAlpacaCredentials,
 } from "../lib/strategy";
+import { saveCredentials } from "../lib/credentials";
 
 const router: IRouter = Router();
 
@@ -46,7 +46,7 @@ router.post("/agent/credentials", async (req, res): Promise<void> => {
   }
   try {
     await validateAlpacaCredentials({ apiKey, apiSecret });
-    setUserCredentials(userId, { apiKey, apiSecret });
+    await saveCredentials(userId, { apiKey, apiSecret });
     res.json({ message: "Paper trading credentials verified and saved for this user." });
   } catch (error) {
     req.log.warn({ err: error }, "Alpaca credential verification failed");

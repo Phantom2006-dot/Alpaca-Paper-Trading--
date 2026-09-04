@@ -167,11 +167,13 @@ Set these variables before starting the API server:
 
 ```bash
 CLERK_SECRET_KEY=<your_clerk_secret_key>
-ALPACA_API_KEY=<your_paper_key>
-ALPACA_API_SECRET=<your_paper_secret>
+ALPACA_API_KEY=<optional_server_default_paper_key>
+ALPACA_API_SECRET=<optional_server_default_paper_secret>
+DATABASE_URL=<your_postgres_connection_string>
+CREDENTIALS_ENCRYPTION_KEY=<64_hex_characters>
 ```
 
-The public landing page still renders if the Vite key is missing, but authenticated app routes require Clerk when the key is configured. Alpaca credentials entered in the Credentials page are stored in server memory and scoped to the signed-in Clerk user. The execution adapter remains locked to `paper-api.alpaca.markets`.
+The public landing page still renders if the Vite key is missing, but authenticated app routes require Clerk when the key is configured. Without `DATABASE_URL`, authenticated demo/status endpoints still work, but saving Alpaca credentials is disabled until Postgres and encryption are configured. Alpaca credentials entered in the Credentials page are verified against the paper `/v2/account` endpoint, encrypted with `CREDENTIALS_ENCRYPTION_KEY`, and stored in Postgres scoped to the signed-in Clerk user. The execution adapter remains locked to `paper-api.alpaca.markets`.
 
 For a deployed frontend, set `VITE_API_URL` in Vercel to the public HTTPS URL of the deployed API server, for example `https://your-api.example.com`. The API server must also have `CLERK_SECRET_KEY`, enable the frontend origin in CORS, and be reachable over HTTPS. Do not point a production frontend at `localhost:8080`.
 
@@ -212,7 +214,8 @@ pnpm --filter @workspace/db run push
 | `CLERK_SECRET_KEY` | Required for protected API routes | Verifies Clerk bearer tokens |
 | `VITE_CLERK_PUBLISHABLE_KEY` | Optional local fallback; required for sign-in | Enables Clerk in the Vite app; stored in `artifacts/alpaca-agent/.env.local` |
 | `VITE_API_URL` | Optional locally; required for separate production API | Public base URL for the Express API server |
-| `DATABASE_URL` | Optional | DB tooling only; not used by agent routes |
+| `DATABASE_URL` | Required for persisted credentials | Postgres connection string for the credential store |
+| `CREDENTIALS_ENCRYPTION_KEY` | Required for persisted credentials | 32-byte AES-256-GCM key, supplied as 64 hex characters or base64 |
 | `PORT` | Optional | API server port (default: 8080) |
 
 ---

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { loadCredentials } from "./credentials";
 
 import type { Logger } from "pino";
 
@@ -44,12 +45,7 @@ type Snapshot = ReturnType<typeof GetMarketSnapshotResponse.parse>;
 type Activity = ReturnType<typeof GetAgentDashboardResponse.parse>["activity"][number];
 
 type AlpacaCredentials = { apiKey: string; apiSecret: string };
-const credentialsByUser = new Map<string, AlpacaCredentials>();
 const requestCredentials = new AsyncLocalStorage<AlpacaCredentials>();
-
-export function setUserCredentials(userId: string, credentials: AlpacaCredentials): void {
-  credentialsByUser.set(userId, credentials);
-}
 
 export async function validateAlpacaCredentials(credentials: AlpacaCredentials): Promise<void> {
   const response = await fetch(`${PAPER_TRADING_URL}/v2/account`, {
@@ -64,8 +60,8 @@ export async function validateAlpacaCredentials(credentials: AlpacaCredentials):
   }
 }
 
-export function withUserCredentials<T>(userId: string, callback: () => T): T {
-  const credentials = credentialsByUser.get(userId);
+export async function withUserCredentials<T>(userId: string, callback: () => T | Promise<T>): Promise<T> {
+  const credentials = await loadCredentials(userId);
   return requestCredentials.run(credentials ?? { apiKey: "", apiSecret: "" }, callback);
 }
 

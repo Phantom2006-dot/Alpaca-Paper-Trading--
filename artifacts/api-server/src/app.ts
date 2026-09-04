@@ -33,13 +33,18 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.use("/api", healthRouter);
-app.use("/api", clerkMiddleware(), (req, res, next) => {
+app.use("/api", clerkMiddleware(), async (req, res, next) => {
   const { userId } = getAuth(req);
   if (!userId) {
     res.status(401).json({ error: "Authentication required." });
     return;
   }
-  withUserCredentials(userId, next);
+  try {
+    await withUserCredentials(userId, next);
+  } catch (error) {
+    req.log.error({ err: error }, "Unable to load user credentials");
+    res.status(503).json({ error: error instanceof Error ? error.message : "Credential storage is unavailable." });
+  }
 });
 app.use("/api", agentRouter);
 
