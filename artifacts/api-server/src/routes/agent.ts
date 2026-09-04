@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { getAuth } from "@clerk/express";
 
 import {
   GetMarketSnapshotParams,
@@ -7,6 +8,7 @@ import {
   RunStrategyBody,
   GetAgentAssetsQueryParams,
   StartAgentBody,
+  PlaceManualTradeBody,
 } from "@workspace/api-zod";
 
 import {
@@ -19,13 +21,31 @@ import {
   getMarketSnapshot,
   getStatus,
   optimizeBacktest,
+  placeManualTrade,
   runBacktest,
   runStrategy,
   startAgent,
   stopAgent,
+  setUserCredentials,
 } from "../lib/strategy";
 
 const router: IRouter = Router();
+
+router.post("/agent/credentials", (req, res): void => {
+  const apiKey = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
+  const apiSecret = typeof req.body?.apiSecret === "string" ? req.body.apiSecret.trim() : "";
+  if (!apiKey || !apiSecret) {
+    res.status(400).json({ error: "Both API key and secret are required." });
+    return;
+  }
+  const { userId } = getAuth(req);
+  if (!userId) {
+    res.status(401).json({ error: "Authentication required." });
+    return;
+  }
+  setUserCredentials(userId, { apiKey, apiSecret });
+  res.json({ message: "Paper trading credentials saved securely for this user." });
+});
 
 router.get("/agent/dashboard", async (req, res): Promise<void> => {
   try {
@@ -319,6 +339,29 @@ router.post("/agent/flatten", async (req, res): Promise<void> => {
   } catch (error) {
     req.log.error({ err: error }, "Paper flatten failed");
     res.status(502).json({ error: error instanceof Error ? error.message : "Paper flatten failed" });
+  }
+});
+
+router.post("/agent/trade", async (req, res): Promise<void> => {
+  const parsed = PlaceManualTradeBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  try {
+    res.json(
+      await placeManualTrade(
+        parsed.data.symbol,
+        parsed.data.side,
+        parsed.data.qty,
+        parsed.data.orderType,
+        parsed.data.limitPrice ?? null,
+        parsed.data.idempotencyKey ?? null,
+      ),
+    );
+  } catch (error) {
+    req.log.error({ err: error }, "Manual trade failed");
+    res.status(502).json({ error: error instanceof Error ? error.message : "Manual trade failed" });
   }
 });
 

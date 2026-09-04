@@ -17,6 +17,7 @@ import {
   LifeBuoy,
   ListChecks,
   LockKeyhole,
+  KeyRound,
   Menu,
   Play,
   RefreshCw,
@@ -81,19 +82,24 @@ import { ConsolePage } from '@/pages/ConsolePage';
 import { AuditPage } from '@/pages/AuditPage';
 import { RiskPage } from '@/pages/RiskPage';
 import { ArchitecturePage } from '@/pages/ArchitecturePage';
+import { TradesPage } from '@/pages/TradesPage';
 import { KillSwitchModal } from '@/components/KillSwitchModal';
+import { useAuth, useClerk, UserButton } from '@clerk/react';
+import { CredentialsPage } from '@/pages/CredentialsPage';
 
 const queryClient = new QueryClient();
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', short: 'DASH', icon: LayoutDashboard },
   { href: '/console', label: 'AI Console', short: 'CONSOLE', icon: BrainCircuit },
+  { href: '/trades', label: 'Trades', short: 'TRADES', icon: TrendingUp },
   { href: '/strategy', label: 'Strategy logic', short: 'LOGIC', icon: SlidersHorizontal },
   { href: '/backtest', label: 'Backtester', short: 'TEST', icon: Database },
   { href: '/audit', label: 'Audit trail', short: 'AUDIT', icon: ListChecks },
   { href: '/risk', label: 'Risk engine', short: 'RISK', icon: ShieldCheck },
   { href: '/account', label: 'Account & orders', short: 'ACCOUNT', icon: WalletCards },
   { href: '/architecture', label: 'Architecture', short: 'ARCH', icon: GitBranch },
+  { href: '/credentials', label: 'Credentials', short: 'CREDS', icon: KeyRound },
 ];
 
 const fallbackSnapshots: SymbolSnapshot[] = [];
@@ -151,8 +157,8 @@ function AppLogo() {
         <span />
       </div>
       <div>
-        <div className="font-display text-[15px] font-bold tracking-[-0.03em] text-sidebar-foreground">alpaca</div>
-        <div className="font-mono text-[9px] uppercase tracking-[0.24em] text-sidebar-foreground/45">agent / r1</div>
+        <div className="font-display text-[15px] font-bold tracking-[-0.03em] text-sidebar-foreground">kairo</div>
+        <div className="font-mono text-[9px] uppercase tracking-[0.24em] text-sidebar-foreground/45">trading agent</div>
       </div>
     </div>
   );
@@ -160,6 +166,8 @@ function AppLogo() {
 
 function Shell({ children }: { children: ReactNode }) {
   const [location] = useLocation();
+  const { isSignedIn } = useAuth();
+  const { openSignIn } = useClerk();
   const [mobileNav, setMobileNav] = useState(false);
   const [killOpen, setKillOpen] = useState(false);
   const [killHalted, setKillHalted] = useState(false);
@@ -292,6 +300,16 @@ function Shell({ children }: { children: ReactNode }) {
             >
               🛑 KILL
             </button>
+            <div className="topbar-divider" />
+            {isSignedIn ? <UserButton /> : (
+              <button
+                className="button button-secondary"
+                style={{ fontSize: 11, padding: '4px 10px' }}
+                onClick={() => openSignIn({})}
+              >
+                Sign in
+              </button>
+            )}
           </div>
         </header>
         <div className="page-wrap">{children}</div>
@@ -1154,7 +1172,7 @@ function LandingNav() {
       <div className="landing-nav-inner">
         <Link href="/" className="landing-logo">
           <div className="logo-mark" aria-hidden="true"><span /><span /><span /></div>
-          <span>alpaca<strong>agent</strong></span>
+          <span>kai<strong>ro</strong></span>
         </Link>
         <div className="landing-nav-links">
           <a href="#features">Features</a>
@@ -1182,7 +1200,7 @@ function HeroSection() {
           <span className="landing-headline-accent">shows its work.</span>
         </motion.h1>
         <motion.p variants={fadeUp} className="landing-subheadline">
-          Alpaca Agent runs Z-score mean-reversion and ICT/SMC + HMM strategies on your paper account.
+          Kairo runs Z-score mean-reversion and ICT/SMC + HMM strategies on your paper account.
           Every decision is logged, every guardrail is visible, every order is explained.
         </motion.p>
         <motion.div variants={fadeUp} className="landing-hero-actions">
@@ -1413,7 +1431,7 @@ function LandingFooter() {
       <div className="landing-footer-inner">
         <div className="landing-footer-brand">
           <div className="logo-mark" aria-hidden="true"><span /><span /><span /></div>
-          <span>alpaca<strong>agent</strong></span>
+          <span>kai<strong>ro</strong></span>
         </div>
         <div className="landing-footer-links">
           <a href="#features">Features</a>
@@ -1448,15 +1466,18 @@ function NotFound() {
 }
 
 function Router() {
+  const { isSignedIn } = useAuth();
+
   return (
     <ErrorBoundary>
       <Switch>
         <Route path="/" component={LandingPage} />
         <Route>
-          <Shell>
+          {isSignedIn ? <Shell>
             <Switch>
               <Route path="/dashboard" component={DashboardPage} />
               <Route path="/console" component={ConsolePage} />
+              <Route path="/trades" component={TradesPage} />
               <Route path="/strategy" component={StrategyPage} />
               <Route path="/backtest" component={BacktestPage} />
               <Route path="/audit" component={AuditPage} />
@@ -1465,9 +1486,10 @@ function Router() {
               <Route path="/architecture" component={ArchitecturePage} />
               <Route path="/settings" component={SettingsPage} />
               <Route path="/account" component={AccountPage} />
+              <Route path="/credentials" component={CredentialsPage} />
               <Route component={NotFound} />
             </Switch>
-          </Shell>
+          </Shell> : <LandingPage />}
         </Route>
       </Switch>
     </ErrorBoundary>

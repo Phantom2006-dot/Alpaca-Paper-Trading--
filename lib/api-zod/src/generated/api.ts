@@ -304,6 +304,31 @@ export const FlattenAgentPositionsResponse = zod.object({
 
 
 /**
+ * @summary Place a manual paper order
+ */
+export const PlaceManualTradeBody = zod.object({
+  "symbol": zod.string().min(1).max(10),
+  "side": zod.enum(['buy', 'sell']),
+  "qty": zod.number().gt(0),
+  "orderType": zod.enum(['market', 'limit']),
+  "limitPrice": zod.number().nullable().optional(),
+  "idempotencyKey": zod.string().nullable().optional()
+})
+
+export const PlaceManualTradeResponse = zod.object({
+  "orderId": zod.string().nullable(),
+  "symbol": zod.string(),
+  "side": zod.enum(['buy', 'sell']),
+  "qty": zod.number(),
+  "orderType": zod.string(),
+  "status": zod.enum(['submitted', 'simulated']),
+  "mode": zod.enum(['paper', 'demo']),
+  "submittedAt": zod.string(),
+  "message": zod.string()
+})
+
+
+/**
  * @summary Get a symbol indicator snapshot
  */
 

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 import type { Logger } from "pino";
 
@@ -14,6 +15,7 @@ import {
   GetAgentAccountResponse,
   StartAgentResponse,
   StopAgentResponse,
+  PlaceManualTradeResponse,
 } from "@workspace/api-zod";
 
 type Bar = {
@@ -40,6 +42,27 @@ type Position = {
 
 type Snapshot = ReturnType<typeof GetMarketSnapshotResponse.parse>;
 type Activity = ReturnType<typeof GetAgentDashboardResponse.parse>["activity"][number];
+
+type AlpacaCredentials = { apiKey: string; apiSecret: string };
+const credentialsByUser = new Map<string, AlpacaCredentials>();
+const requestCredentials = new AsyncLocalStorage<AlpacaCredentials>();
+
+export function setUserCredentials(userId: string, credentials: AlpacaCredentials): void {
+  credentialsByUser.set(userId, credentials);
+}
+
+export function withUserCredentials<T>(userId: string, callback: () => T): T {
+  const credentials = credentialsByUser.get(userId);
+  return requestCredentials.run(credentials ?? { apiKey: "", apiSecret: "" }, callback);
+}
+
+function getAlpacaCredentials(): AlpacaCredentials {
+  const scoped = requestCredentials.getStore();
+  return scoped ?? {
+    apiKey: process.env["ALPACA_API_KEY"] ?? "",
+    apiSecret: process.env["ALPACA_API_SECRET"] ?? "",
+  };
+}
 
 export type AuditRun = Activity & {
   runId: string;
@@ -281,9 +304,8 @@ let automationLastError: string | null = null;
 let automationCycleInFlight = false;
 
 function hasCredentials(): boolean {
-  return Boolean(
-    process.env["ALPACA_API_KEY"] && process.env["ALPACA_API_SECRET"],
-  );
+  const credentials = getAlpacaCredentials();
+  return Boolean(credentials.apiKey && credentials.apiSecret);
 }
 
 function mode(): "paper" | "demo" {
@@ -403,8 +425,8 @@ async function alpacaRequest<T>(
   const response = await fetch(`${PAPER_TRADING_URL}${path}`, {
     ...init,
     headers: {
-      "APCA-API-KEY-ID": process.env["ALPACA_API_KEY"] ?? "",
-      "APCA-API-SECRET-KEY": process.env["ALPACA_API_SECRET"] ?? "",
+      "APCA-API-KEY-ID": getAlpacaCredentials().apiKey,
+      "APCA-API-SECRET-KEY": getAlpacaCredentials().apiSecret,
       "Content-Type": "application/json",
       ...(init.headers ?? {}),
     },
@@ -432,8 +454,8 @@ async function fetchBars(
     `${MARKET_DATA_URL}/stocks/${encodeURIComponent(symbol)}/bars?${query.toString()}`,
     {
       headers: {
-        "APCA-API-KEY-ID": process.env["ALPACA_API_KEY"] ?? "",
-        "APCA-API-SECRET-KEY": process.env["ALPACA_API_SECRET"] ?? "",
+        "APCA-API-KEY-ID": getAlpacaCredentials().apiKey,
+        "APCA-API-SECRET-KEY": getAlpacaCredentials().apiSecret,
       },
     },
   );
@@ -474,8 +496,8 @@ async function fetchHistoricalBars(
     `${MARKET_DATA_URL}/stocks/${encodeURIComponent(symbol)}/bars?${query.toString()}`,
     {
       headers: {
-        "APCA-API-KEY-ID": process.env["ALPACA_API_KEY"] ?? "",
-        "APCA-API-SECRET-KEY": process.env["ALPACA_API_SECRET"] ?? "",
+        "APCA-API-KEY-ID": getAlpacaCredentials().apiKey,
+        "APCA-API-SECRET-KEY": getAlpacaCredentials().apiSecret,
       },
     },
   );
@@ -818,8 +840,8 @@ async function closePosition(
       {
         method: "DELETE",
         headers: {
-          "APCA-API-KEY-ID": process.env["ALPACA_API_KEY"] ?? "",
-          "APCA-API-SECRET-KEY": process.env["ALPACA_API_SECRET"] ?? "",
+          "APCA-API-KEY-ID": getAlpacaCredentials().apiKey,
+          "APCA-API-SECRET-KEY": getAlpacaCredentials().apiSecret,
         },
       },
     );
@@ -1085,6 +1107,79 @@ export async function runStrategy(
   });
 }
 
+export async function placeManualTrade(
+  symbol: string,
+  side: "buy" | "sell",
+  qty: number,
+  orderType: "market" | "limit",
+  limitPrice: number | null | undefined,
+  idempotencyKey: string | null | undefined,
+) {
+  const sym = symbol.trim().toUpperCase();
+  checkIdempotency(idempotencyKey ?? undefined);
+  let orderId: string | null = null;
+  let status: "submitted" | "simulated" = "simulated";
+  if (hasCredentials()) {
+    const body: Record<string, string> = {
+      symbol: sym,
+      qty: String(qty),
+      side,
+      type: orderType,
+      time_in_force: "day",
+      client_order_id: idempotencyKey ?? randomUUID(),
+    };
+    if (orderType === "limit" && limitPrice != null) {
+      body["limit_price"] = String(limitPrice);
+    }
+    const order = await alpacaRequest<{ id: string }>("/v2/orders", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    orderId = order.id;
+    status = "submitted";
+  } else {
+    // demo mode — update in-memory position
+    const bars = demoBars(sym);
+    const price = bars.at(-1)?.close ?? 100;
+    if (side === "buy") {
+      demoPositions.set(sym, {
+        symbol: sym,
+        qty,
+        side: "long",
+        avgEntryPrice: price,
+        currentPrice: price,
+        marketValue: price * qty,
+        unrealizedPnl: 0,
+      });
+    } else {
+      demoPositions.delete(sym);
+    }
+  }
+  const submittedAt = new Date().toISOString();
+  addActivity({
+    at: submittedAt,
+    action: side === "buy" ? "MANUAL BUY" : "MANUAL SELL",
+    symbol: sym,
+    zScore: 0,
+    reason: `Manual ${orderType} order · ${qty} share${qty === 1 ? "" : "s"} ${side === "buy" ? "bought" : "sold"}.`,
+    orderId,
+    status,
+  });
+  return PlaceManualTradeResponse.parse({
+    orderId,
+    symbol: sym,
+    side,
+    qty,
+    orderType,
+    status,
+    mode: mode(),
+    submittedAt,
+    message: status === "submitted"
+      ? `Paper ${orderType} order submitted to Alpaca · ${qty} × ${sym} ${side.toUpperCase()}`
+      : `Demo ${orderType} order simulated · ${qty} × ${sym} ${side.toUpperCase()}`,
+  });
+}
+
 export async function flattenPositions(log: Logger) {
   const positions = await fetchPositions();
   let closed = 0;
@@ -1093,8 +1188,8 @@ export async function flattenPositions(log: Logger) {
       const response = await fetch(`${PAPER_TRADING_URL}/v2/positions`, {
         method: "DELETE",
         headers: {
-          "APCA-API-KEY-ID": process.env["ALPACA_API_KEY"] ?? "",
-          "APCA-API-SECRET-KEY": process.env["ALPACA_API_SECRET"] ?? "",
+          "APCA-API-KEY-ID": getAlpacaCredentials().apiKey,
+          "APCA-API-SECRET-KEY": getAlpacaCredentials().apiSecret,
         },
       });
       if (!response.ok) {

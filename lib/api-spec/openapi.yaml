@@ -172,6 +172,37 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FlattenResult"
+  /agent/trade:
+    post:
+      operationId: placeManualTrade
+      tags: [agent]
+      summary: Place a manual paper order
+      description: Submits a market or limit paper order directly to Alpaca without running the strategy engine. Paper-only lock enforced.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManualTradeInput"
+      responses:
+        "200":
+          description: Order result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManualTradeResult"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Alpaca unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /agent/market/{symbol}:
     get:
       operationId: getMarketSnapshot
@@ -835,3 +866,51 @@ components:
         message:
           type: string
       required: [closed, mode, at, message]
+    ManualTradeInput:
+      type: object
+      properties:
+        symbol:
+          type: string
+          minLength: 1
+          maxLength: 10
+        side:
+          type: string
+          enum: [buy, sell]
+        qty:
+          type: number
+          exclusiveMinimum: 0
+        orderType:
+          type: string
+          enum: [market, limit]
+        limitPrice:
+          type: number
+          nullable: true
+        idempotencyKey:
+          type: string
+          nullable: true
+      required: [symbol, side, qty, orderType]
+    ManualTradeResult:
+      type: object
+      properties:
+        orderId:
+          type: ["string", "null"]
+        symbol:
+          type: string
+        side:
+          type: string
+          enum: [buy, sell]
+        qty:
+          type: number
+        orderType:
+          type: string
+        status:
+          type: string
+          enum: [submitted, simulated]
+        mode:
+          type: string
+          enum: [paper, demo]
+        submittedAt:
+          type: string
+        message:
+          type: string
+      required: [orderId, symbol, side, qty, orderType, status, mode, submittedAt, message]
