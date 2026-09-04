@@ -1,6 +1,13 @@
-# Alpaca AI Trading Agent
+# Kairo AI Trading Agent
 
-An explainable, paper-only AI trading cockpit built on Alpaca Markets. The agent autonomously scans market data, formulates a thesis, passes every decision through deterministic risk gates, executes paper orders, and exposes a full immutable audit trail — all visible to the operator in real time.
+An explainable, paper-only AI trading cockpit built on Alpaca Markets. Kairo scans market data, formulates a thesis, passes every decision through deterministic risk gates, executes paper orders, and exposes an audit trail in real time.
+
+Kairo has two linked entry points:
+
+- **Web cockpit:** authenticated research, strategy, risk, paper execution, credentials, and audit workspace.
+- **Telegram channel:** the linked Minisbot experience at <https://minis-yzdb.onrender.com> for users who prefer a conversational workflow.
+
+Users can choose either channel. The web Launch App and Start for free actions open authentication first, then route a successfully authenticated user to `/dashboard`. Telegram is an alternate interface and does not enable live trading.
 
 > **Paper trading only.** The execution adapter is hardcoded to `paper-api.alpaca.markets`. No live order routing exists anywhere in this codebase.
 
@@ -62,6 +69,7 @@ API Server (Express 5 :8080)
 | `POST` | `/api/agent/optimize` | Grid-search threshold optimization (72 candidates) |
 | `GET` | `/api/agent/audit` | All audit run records |
 | `GET` | `/api/agent/console/stream` | SSE pipeline stream (7 steps) |
+| `POST` | `/api/agent/credentials` | Store paper credentials in memory for the signed-in user |
 
 ---
 
@@ -69,8 +77,8 @@ API Server (Express 5 :8080)
 
 | Route | Description |
 |---|---|
-| `/landing` | Marketing landing page — features, pricing, how it works |
-| `/` | Dashboard — account strip, metrics rail, symbol scanner, activity feed |
+| `/` | Public landing page — features, pricing, web launch, and Telegram entry point |
+| `/dashboard` | Authenticated dashboard — account strip, metrics rail, symbol scanner, activity feed |
 | `/console` | **AI Agent Console** — 7-step SSE pipeline stepper with live Decision Inspector |
 | `/strategy` | Strategy logic — flow diagram, guardrail matrix, operator scan controls |
 | `/backtest` | Historical backtester — date range, capital, timeframe, optimizer |
@@ -142,16 +150,23 @@ pnpm --filter @workspace/alpaca-agent run dev
 
 No credentials required — demo mode uses synthetic sine-wave data automatically.
 
-### Run with Alpaca paper account
+### Run with Clerk authentication and an Alpaca paper account
 
-Set environment variables before starting the API server:
+Create `artifacts/alpaca-agent/.env.local` for the Vite app:
 
 ```bash
+VITE_CLERK_PUBLISHABLE_KEY=<your_clerk_publishable_key>
+```
+
+Set these variables before starting the API server:
+
+```bash
+CLERK_SECRET_KEY=<your_clerk_secret_key>
 ALPACA_API_KEY=<your_paper_key>
 ALPACA_API_SECRET=<your_paper_secret>
 ```
 
-With credentials present, the agent uses real Alpaca paper account data, submits real paper orders, and enables historical backtests. The execution adapter remains locked to `paper-api.alpaca.markets`.
+The public landing page still renders if the Vite key is missing, but authenticated app routes require Clerk when the key is configured. Alpaca credentials entered in the Credentials page are stored in server memory and scoped to the signed-in Clerk user. The execution adapter remains locked to `paper-api.alpaca.markets`.
 
 ### Build
 
@@ -187,6 +202,8 @@ pnpm --filter @workspace/db run push
 |---|---|---|
 | `ALPACA_API_KEY` | Optional | Enables paper mode; absent = demo mode |
 | `ALPACA_API_SECRET` | Optional | Enables paper mode |
+| `CLERK_SECRET_KEY` | Required for protected API routes | Verifies Clerk bearer tokens |
+| `VITE_CLERK_PUBLISHABLE_KEY` | Optional local fallback; required for sign-in | Enables Clerk in the Vite app; stored in `artifacts/alpaca-agent/.env.local` |
 | `DATABASE_URL` | Optional | DB tooling only; not used by agent routes |
 | `PORT` | Optional | API server port (default: 8080) |
 
@@ -256,7 +273,7 @@ Alpaca-Paper-Trading--/
 - All agent state (activity log, audit runs, automation state) is in-memory and lost on server restart. The PostgreSQL/Drizzle DB is wired but not yet used by agent routes.
 - `winRate` (68.4%) and `avgHoldHours` (6.2h) in dashboard metrics are placeholder values, not computed from real trade history.
 - The optimization endpoint (`POST /agent/optimize`) runs 72 sequential backtests synchronously and can block the event loop for several minutes on large date ranges.
-- No authentication on API routes. Suitable for local/demo use; add an `Authorization` header check before any public deployment.
+- Clerk protects the agent API routes. Keep `CLERK_SECRET_KEY` server-side and never commit `.env.local` files.
 
 ---
 

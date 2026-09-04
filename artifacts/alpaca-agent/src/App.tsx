@@ -41,6 +41,7 @@ import {
   CircleCheck,
   Rocket,
   Building2,
+  MessageCircle,
 } from 'lucide-react';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
@@ -87,6 +88,7 @@ import { KillSwitchModal } from '@/components/KillSwitchModal';
 import { useAuth, useClerk, UserButton } from '@clerk/react';
 
 const hasClerk = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
+const TELEGRAM_BOT_URL = 'https://minis-yzdb.onrender.com';
 import { CredentialsPage } from '@/pages/CredentialsPage';
 
 const queryClient = new QueryClient();
@@ -1240,6 +1242,9 @@ function HeroSection() {
         </motion.p>
         <motion.div variants={fadeUp} className="landing-hero-actions">
           <LaunchAppAction className="button button-primary landing-hero-btn"><Rocket size={15} /> Start for free</LaunchAppAction>
+          <a href={TELEGRAM_BOT_URL} target="_blank" rel="noopener noreferrer" className="button button-secondary landing-hero-btn">
+            <MessageCircle size={15} /> Use Telegram bot
+          </a>
           <a href="#how-it-works" className="button button-secondary landing-hero-btn">
             See how it works
           </a>
@@ -1396,7 +1401,6 @@ const PLANS = [
     icon: Star,
     features: ['Z-score + ADX strategy', 'Demo mode (no API key needed)', 'Manual scan + one-shot run', 'Activity audit trail', '4 default symbols', 'Paper-only execution lock'],
     cta: 'Start free',
-    href: '/dashboard',
     highlight: false,
   },
   {
@@ -1407,7 +1411,6 @@ const PLANS = [
     icon: Zap,
     features: ['Everything in Free', 'ICT / HMM 5-cluster engine', 'Continuous automation loop', 'Historical backtest (180 days)', 'Strategy optimizer (72 candidates)', 'Up to 8 symbols', 'Priority support'],
     cta: 'Start Pro',
-    href: '/dashboard',
     highlight: true,
   },
   {
@@ -1418,7 +1421,6 @@ const PLANS = [
     icon: Building2,
     features: ['Everything in Pro', 'Multi-account management', 'Custom strategy modules', 'Dedicated infrastructure', 'SLA + uptime guarantee', 'Onboarding & training', 'API access'],
     cta: 'Contact us',
-    href: '/dashboard',
     highlight: false,
   },
 ];
@@ -1432,7 +1434,7 @@ function PricingSection() {
         <motion.p variants={fadeUp} className="landing-section-sub">All plans include paper-only execution. No live trading, no hidden fees.</motion.p>
       </motion.div>
       <motion.div className="pricing-grid" variants={stagger} initial="hidden" whileInView="show" viewport={{ once: true, margin: '-60px' }}>
-        {PLANS.map(({ name, price, period, desc, icon: Icon, features, cta, href, highlight }) => (
+        {PLANS.map(({ name, price, period, desc, icon: Icon, features, cta, highlight }) => (
           <motion.div key={name} variants={fadeUp} className={cx('pricing-card', highlight && 'is-highlight')}>
             {highlight && <div className="pricing-badge"><Sparkles size={11} /> Most popular</div>}
             <div className="pricing-header">
@@ -1448,9 +1450,9 @@ function PricingSection() {
                 <li key={f}><CircleCheck size={13} />{f}</li>
               ))}
             </ul>
-            <Link href={href} className={cx('button pricing-btn', highlight ? 'button-primary' : 'button-secondary')}>
-              {cta} <ArrowRight size={13} />
-            </Link>
+            <LaunchAppAction className={cx('button pricing-btn', highlight ? 'button-primary' : 'button-secondary')}>
+              {cta}
+            </LaunchAppAction>
           </motion.div>
         ))}
       </motion.div>
@@ -1470,7 +1472,7 @@ function LandingFooter() {
           <a href="#features">Features</a>
           <a href="#how-it-works">How it works</a>
           <a href="#pricing">Pricing</a>
-          <Link href="/dashboard">Launch app</Link>
+          <LaunchAppAction className="text-link">Launch app</LaunchAppAction>
         </div>
         <div className="landing-footer-note">Paper trading only · No live order routing · Built on Alpaca Markets API</div>
       </div>
