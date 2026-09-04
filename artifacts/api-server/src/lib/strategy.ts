@@ -13,6 +13,7 @@ import {
   GetAgentAssetsResponse,
   GetAgentAccountResponse,
   StartAgentResponse,
+  TestPaperRoundTripResponse,
 } from "@workspace/api-zod";
 
 type Bar = {
@@ -844,6 +845,130 @@ export async function stopAgent(log: Logger) {
   return StartAgentResponse.parse({
     status: await getStatus(),
     message: "Agent stopped. Existing paper positions remain open until you flatten or the agent is started again.",
+  });
+}
+
+async function waitForFilledOrder(orderId: string): Promise<{
+  status: string;
+  filledQty: number;
+}> {
+  for (let attempt = 0; attempt < 15; attempt += 1) {
+    const order = await alpacaRequest<{
+      status: string;
+      filled_qty: string;
+    }>(`/v2/orders/${encodeURIComponent(orderId)}`);
+    const status = order.status.toLowerCase();
+    if (status === "filled" || ["canceled", "rejected", "expired"].includes(status)) {
+      return { status: order.status, filledQty: toNumber(order.filled_qty) };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  return { status: "timeout", filledQty: 0 };
+}
+
+export async function testPaperRoundTrip(
+  symbol: string,
+  quantity: number,
+  log: Logger,
+) {
+  if (!hasCredentials()) {
+    throw new Error("Alpaca paper credentials are required for the round-trip test.");
+  }
+  if (agentRunning) {
+    throw new Error("Stop the autonomous agent before running an isolated round-trip test.");
+  }
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10) {
+    throw new Error("The test quantity must be a whole number from 1 to 10.");
+  }
+  if (!(await marketIsOpen())) {
+    throw new Error("The U.S. market is closed. Run the round-trip test during regular market hours.");
+  }
+
+  const normalizedSymbol = symbol.trim().toUpperCase();
+  if (!normalizedSymbol) throw new Error("A symbol is required for the round-trip test.");
+  const [positions, orders] = await Promise.all([fetchPositions(), fetchOrders()]);
+  if (positionFor(positions, normalizedSymbol)) {
+    throw new Error(`Refusing to test ${normalizedSymbol}: an open position already exists.`);
+  }
+  const pending = orders.some(
+    (order) =>
+      order.symbol === normalizedSymbol &&
+      ["new", "accepted", "pending_new", "partially_filled"].includes(
+        order.status.toLowerCase(),
+      ),
+  );
+  if (pending) {
+    throw new Error(`Refusing to test ${normalizedSymbol}: a pending order already exists.`);
+  }
+
+  const entry = await alpacaRequest<{ id: string; status: string }>("/v2/orders", {
+    method: "POST",
+    body: JSON.stringify({
+      symbol: normalizedSymbol,
+      qty: String(quantity),
+      side: "buy",
+      type: "market",
+      time_in_force: "day",
+    }),
+  });
+  const filled = await waitForFilledOrder(entry.id);
+  if (filled.status.toLowerCase() !== "filled") {
+    try {
+      await alpacaRequest(`/v2/orders/${encodeURIComponent(entry.id)}`, {
+        method: "DELETE",
+      });
+    } catch (error) {
+      log.warn({ err: error, orderId: entry.id }, "Unable to cancel unfilled test order");
+    }
+    throw new Error(`The test entry order did not fill (status: ${filled.status}). It was canceled or expired without opening a position.`);
+  }
+
+  addActivity({
+    at: new Date().toISOString(),
+    action: "TEST LONG ENTRY",
+    symbol: normalizedSymbol,
+    zScore: 0,
+    reason: "Temporary paper round-trip test entry filled successfully.",
+    orderId: entry.id,
+    status: "submitted",
+  });
+
+  let exit: { id: string; status: string } | null = null;
+  try {
+    exit = await alpacaRequest<{ id: string; status: string }>(
+      `/v2/positions/${encodeURIComponent(normalizedSymbol)}`,
+      { method: "DELETE" },
+    );
+  } catch (error) {
+    log.error(
+      { err: error, symbol: normalizedSymbol, entryOrderId: entry.id },
+      "Test entry filled but immediate close failed",
+    );
+    throw new Error(`The test entry filled, but the close request failed. Flatten ${normalizedSymbol} manually from Account & orders.`);
+  }
+
+  addActivity({
+    at: new Date().toISOString(),
+    action: "TEST ROUND-TRIP EXIT",
+    symbol: normalizedSymbol,
+    zScore: 0,
+    reason: "Temporary paper round-trip test close submitted immediately after the entry fill.",
+    orderId: exit.id,
+    status: "closed",
+  });
+  log.info(
+    { symbol: normalizedSymbol, quantity, entryOrderId: entry.id, exitOrderId: exit.id },
+    "Paper round-trip test completed",
+  );
+  return TestPaperRoundTripResponse.parse({
+    symbol: normalizedSymbol,
+    quantity,
+    entryOrderId: entry.id,
+    entryStatus: filled.status,
+    exitOrderId: exit.id,
+    exitStatus: exit.status,
+    at: new Date().toISOString(),
+    message: `Paper round trip completed for ${quantity} share${quantity === 1 ? "" : "s"} of ${normalizedSymbol}.`,
   });
 }
 

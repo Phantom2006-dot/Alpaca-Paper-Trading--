@@ -401,6 +401,28 @@ export interface AgentControlResult {
   message: string;
 }
 
+export interface TestTradeInput {
+  /** @minLength 1 */
+  symbol?: string;
+  /**
+     * @minimum 1
+     * @maximum 10
+     */
+  quantity?: number;
+}
+
+export interface TestTradeResult {
+  symbol: string;
+  quantity: number;
+  entryOrderId: string;
+  entryStatus: string;
+  /** @nullable */
+  exitOrderId: string | null;
+  exitStatus: string;
+  at: string;
+  message: string;
+}
+
 export type FlattenResultMode = typeof FlattenResultMode[keyof typeof FlattenResultMode];
 
 

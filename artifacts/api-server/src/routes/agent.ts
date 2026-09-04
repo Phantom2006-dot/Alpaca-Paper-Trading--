@@ -7,6 +7,7 @@ import {
   RunStrategyBody,
   GetAgentAssetsQueryParams,
   StartAgentBody,
+  TestPaperRoundTripBody,
 } from "@workspace/api-zod";
 
 import {
@@ -22,6 +23,7 @@ import {
   runStrategy,
   startAgent,
   stopAgent,
+  testPaperRoundTrip,
 } from "../lib/strategy";
 
 const router: IRouter = Router();
@@ -70,6 +72,29 @@ router.post("/agent/stop", async (req, res): Promise<void> => {
     req.log.error({ err: error }, "Continuous agent stop failed");
     res.status(502).json({
       error: error instanceof Error ? error.message : "Continuous agent could not stop",
+    });
+  }
+});
+
+router.post("/agent/test-trade", async (req, res): Promise<void> => {
+  const parsed = TestPaperRoundTripBody.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    req.log.warn({ errors: parsed.error.message }, "Invalid paper round-trip input");
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  try {
+    res.json(
+      await testPaperRoundTrip(
+        parsed.data.symbol,
+        parsed.data.quantity,
+        req.log,
+      ),
+    );
+  } catch (error) {
+    req.log.error({ err: error }, "Paper round-trip test failed");
+    res.status(409).json({
+      error: error instanceof Error ? error.message : "Paper round-trip test failed",
     });
   }
 });

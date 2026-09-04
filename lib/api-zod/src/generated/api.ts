@@ -216,6 +216,34 @@ export const StopAgentResponse = zod.object({
 
 
 /**
+ * Opens one small paper position, waits for the entry to fill, and immediately submits a market close. This never uses live trading.
+ * @summary Run a temporary paper round trip
+ */
+export const testPaperRoundTripBodySymbolDefault = `MC`;
+
+export const testPaperRoundTripBodyQuantityDefault = 1;
+export const testPaperRoundTripBodyQuantityMax = 10;
+
+
+
+export const TestPaperRoundTripBody = zod.object({
+  "symbol": zod.string().min(1).default(testPaperRoundTripBodySymbolDefault),
+  "quantity": zod.number().min(1).max(testPaperRoundTripBodyQuantityMax).default(testPaperRoundTripBodyQuantityDefault)
+})
+
+export const TestPaperRoundTripResponse = zod.object({
+  "symbol": zod.string(),
+  "quantity": zod.number(),
+  "entryOrderId": zod.string(),
+  "entryStatus": zod.string(),
+  "exitOrderId": zod.string().nullable(),
+  "exitStatus": zod.string(),
+  "at": zod.string(),
+  "message": zod.string()
+})
+
+
+/**
  * @summary Search tradable Alpaca assets
  */
 export const getAgentAssetsQuerySearchMax = 40;

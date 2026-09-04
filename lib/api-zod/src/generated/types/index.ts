@@ -46,4 +46,6 @@ export * from './symbolSnapshot';
 export * from './symbolSnapshotPositionSide';
 export * from './symbolSnapshotRegime';
 export * from './symbolSnapshotSignal';
+export * from './testTradeInput';
+export * from './testTradeResult';
 export * from './tradableAsset';
