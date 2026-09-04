@@ -6,6 +6,7 @@ import {
   RunBacktestBody,
   RunStrategyBody,
   GetAgentAssetsQueryParams,
+  StartAgentBody,
 } from "@workspace/api-zod";
 
 import {
@@ -19,6 +20,8 @@ import {
   optimizeBacktest,
   runBacktest,
   runStrategy,
+  startAgent,
+  stopAgent,
 } from "../lib/strategy";
 
 const router: IRouter = Router();
@@ -34,6 +37,33 @@ router.get("/agent/dashboard", async (req, res): Promise<void> => {
 
 router.get("/agent/status", async (req, res): Promise<void> => {
   res.json(await getStatus());
+});
+
+router.post("/agent/start", async (req, res): Promise<void> => {
+  const parsed = StartAgentBody.safeParse(req.body);
+  if (!parsed.success) {
+    req.log.warn({ errors: parsed.error.message }, "Invalid agent start input");
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  try {
+    res.json(
+      await startAgent(
+        parsed.data.symbols,
+        parsed.data.intervalSeconds,
+        req.log,
+      ),
+    );
+  } catch (error) {
+    req.log.error({ err: error }, "Unable to start continuous agent");
+    res.status(502).json({
+      error: error instanceof Error ? error.message : "Unable to start agent",
+    });
+  }
+});
+
+router.post("/agent/stop", async (req, res): Promise<void> => {
+  res.json(stopAgent(req.log));
 });
 
 router.get("/agent/assets", async (req, res): Promise<void> => {

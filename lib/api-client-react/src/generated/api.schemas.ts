@@ -260,9 +260,53 @@ export interface AgentStatus {
   lastRunAt: string | null;
   /** @nullable */
   nextRunAt: string | null;
+  running: boolean;
+  intervalSeconds: number;
+  /** @nullable */
+  startedAt: string | null;
+  /** @nullable */
+  lastError: string | null;
   symbols: string[];
   heartbeat: string;
   guardrails: GuardrailState;
+}
+
+export interface AgentAutomationInput {
+  /**
+     * @minItems 1
+     * @maxItems 8
+     * @items.minLength 1
+     */
+  symbols: string[];
+  /**
+     * @minimum 30
+     * @maximum 3600
+     */
+  intervalSeconds: number;
+}
+
+export type AgentAutomationResponseMode = typeof AgentAutomationResponseMode[keyof typeof AgentAutomationResponseMode];
+
+
+export const AgentAutomationResponseMode = {
+  paper: 'paper',
+  demo: 'demo',
+} as const;
+
+export interface AgentAutomationResponse {
+  running: boolean;
+  mode: AgentAutomationResponseMode;
+  symbols: string[];
+  intervalSeconds: number;
+  /** @nullable */
+  startedAt: string | null;
+  /** @nullable */
+  lastRunAt: string | null;
+  /** @nullable */
+  nextRunAt: string | null;
+  /** @nullable */
+  lastError: string | null;
+  message: string;
 }
 
 export type SymbolSnapshotPositionSide = typeof SymbolSnapshotPositionSide[keyof typeof SymbolSnapshotPositionSide];

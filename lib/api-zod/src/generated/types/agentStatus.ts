@@ -16,6 +16,12 @@ export interface AgentStatus {
   lastRunAt: string | null;
   /** @nullable */
   nextRunAt: string | null;
+  running: boolean;
+  intervalSeconds: number;
+  /** @nullable */
+  startedAt: string | null;
+  /** @nullable */
+  lastError: string | null;
   symbols: string[];
   heartbeat: string;
   guardrails: GuardrailState;

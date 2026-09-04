@@ -12,6 +12,8 @@ import {
   OptimizeBacktestResponse,
   GetAgentAssetsResponse,
   GetAgentAccountResponse,
+  StartAgentResponse,
+  StopAgentResponse,
 } from "@workspace/api-zod";
 
 type Bar = {
@@ -66,6 +68,15 @@ let activities: Activity[] = [];
 const demoPositions = new Map<string, Position>();
 const trailingExtremes = new Map<string, number>();
 const DEFAULT_BACKTEST_DAYS = 180;
+const DEFAULT_AUTOMATION_INTERVAL_SECONDS = 300;
+let automationTimer: ReturnType<typeof setTimeout> | null = null;
+let automationRunning = false;
+let automationIntervalSeconds = DEFAULT_AUTOMATION_INTERVAL_SECONDS;
+let automationSymbols = [...DEFAULT_SYMBOLS];
+let automationStartedAt: string | null = null;
+let automationNextRunAt: string | null = null;
+let automationLastError: string | null = null;
+let automationCycleInFlight = false;
 
 function hasCredentials(): boolean {
   return Boolean(
@@ -75,6 +86,14 @@ function hasCredentials(): boolean {
 
 function mode(): "paper" | "demo" {
   return hasCredentials() ? "paper" : "demo";
+}
+
+function normalizedSymbols(symbols: string[]): string[] {
+  return [
+    ...new Set(
+      symbols.map((symbol) => symbol.trim().toUpperCase()).filter(Boolean),
+    ),
+  ].slice(0, 8);
 }
 
 async function credentialsWork(): Promise<boolean> {
@@ -596,12 +615,107 @@ export async function getStatus() {
     connected,
     paper: true,
     lastRunAt,
-    nextRunAt: lastRunAt
-      ? new Date(new Date(lastRunAt).getTime() + 5 * 60_000).toISOString()
-      : null,
+    nextRunAt: automationRunning ? automationNextRunAt : null,
+    running: automationRunning,
+    intervalSeconds: automationIntervalSeconds,
+    startedAt: automationStartedAt,
+    lastError: automationLastError,
     symbols: DEFAULT_SYMBOLS,
     heartbeat: new Date().toISOString(),
     guardrails,
+  });
+}
+
+function clearAutomationTimer() {
+  if (automationTimer) {
+    clearTimeout(automationTimer);
+    automationTimer = null;
+  }
+  automationNextRunAt = null;
+}
+
+async function runAutomationCycle(log: Logger) {
+  if (!automationRunning || automationCycleInFlight) return;
+  automationCycleInFlight = true;
+  try {
+    await runStrategy(automationSymbols, false, log);
+    automationLastError = null;
+  } catch (error) {
+    automationLastError =
+      error instanceof Error ? error.message : "Strategy cycle failed";
+    log.error({ err: error }, "Continuous strategy cycle failed");
+  } finally {
+    automationCycleInFlight = false;
+  }
+}
+
+function scheduleAutomationCycle(log: Logger) {
+  if (!automationRunning) return;
+  const delay = automationIntervalSeconds * 1000;
+  automationNextRunAt = new Date(Date.now() + delay).toISOString();
+  automationTimer = setTimeout(async () => {
+    automationTimer = null;
+    if (!automationRunning) return;
+    await runAutomationCycle(log);
+    scheduleAutomationCycle(log);
+  }, delay);
+}
+
+export async function startAgent(
+  symbols: string[],
+  intervalSeconds: number,
+  log: Logger,
+) {
+  const selectedSymbols = normalizedSymbols(symbols);
+  if (!selectedSymbols.length) {
+    throw new Error("At least one symbol is required to start the agent.");
+  }
+
+  clearAutomationTimer();
+  automationSymbols = selectedSymbols;
+  automationIntervalSeconds = intervalSeconds;
+  automationStartedAt = new Date().toISOString();
+  automationRunning = true;
+  automationLastError = null;
+
+  await runAutomationCycle(log);
+  scheduleAutomationCycle(log);
+
+  return StartAgentResponse.parse({
+    running: automationRunning,
+    mode: mode(),
+    symbols: automationSymbols,
+    intervalSeconds: automationIntervalSeconds,
+    startedAt: automationStartedAt,
+    lastRunAt,
+    nextRunAt: automationNextRunAt,
+    lastError: automationLastError,
+    message:
+      mode() === "paper"
+        ? `Agent started. Paper strategy cycles run every ${automationIntervalSeconds} seconds.`
+        : "Agent started in demo mode. Add Alpaca paper credentials before relying on paper execution.",
+  });
+}
+
+export function stopAgent(log: Logger) {
+  const wasRunning = automationRunning;
+  automationRunning = false;
+  clearAutomationTimer();
+  automationStartedAt = null;
+  log.info({ wasRunning }, "Continuous strategy agent stopped");
+
+  return StopAgentResponse.parse({
+    running: false,
+    mode: mode(),
+    symbols: automationSymbols,
+    intervalSeconds: automationIntervalSeconds,
+    startedAt: null,
+    lastRunAt,
+    nextRunAt: null,
+    lastError: automationLastError,
+    message: wasRunning
+      ? "Agent stopped. Existing paper positions were not changed."
+      : "Agent is already stopped. Existing paper positions were not changed.",
   });
 }
 
@@ -636,7 +750,7 @@ export async function runStrategy(
   log: Logger,
   rules: StrategyRules = guardrails,
 ) {
-  const selectedSymbols = [...new Set(symbols.map((symbol) => symbol.trim().toUpperCase()).filter(Boolean))].slice(0, 8);
+  const selectedSymbols = normalizedSymbols(symbols);
   const [account, positions] = await Promise.all([fetchAccount(), fetchPositions()]);
   const snapshots = await Promise.all(
     selectedSymbols.map(async (symbol) => {

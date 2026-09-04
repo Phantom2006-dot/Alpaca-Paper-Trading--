@@ -4,12 +4,16 @@ An explainable AI-assisted Alpaca paper-trading agent that researches, scans, an
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- Use the **Alpaca Agent** workflow or the Replit Run button — starts the API on port 8080 and the Vite cockpit on port 24492.
+- `PORT=8080 pnpm --filter @workspace/api-server run dev` — run only the API server.
+- `API_PORT=8080 PORT=24492 BASE_PATH=/ pnpm --filter @workspace/alpaca-agent run dev` — run only the cockpit against the local API.
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- No external credentials are required for demo mode.
+- Optional paper-account env: `ALPACA_API_KEY` and `ALPACA_API_SECRET`. Their presence enables Alpaca paper-account data, paper orders, historical backtests, and optimization; the execution adapter remains locked to Alpaca's paper API.
+- `DATABASE_URL` is required only for database tooling; the current agent routes do not use the database.
 
 ## Stack
 
@@ -22,7 +26,11 @@ An explainable AI-assisted Alpaca paper-trading agent that researches, scans, an
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/alpaca-agent/` — React/Vite operator cockpit.
+- `artifacts/api-server/src/lib/strategy.ts` — agent strategy, paper adapter, guardrails, demo lane, backtests, and decision activity.
+- `artifacts/api-server/src/routes/agent.ts` — agent API routes.
+- `lib/api-spec/openapi.yaml` — API contract source of truth.
+- `lib/api-client-react/` and `lib/api-zod/` — generated browser hooks and server validation.
 
 ## Architecture decisions
 

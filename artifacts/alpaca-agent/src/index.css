@@ -494,6 +494,11 @@
 .status-grid > div:nth-last-child(-n+2) { border-bottom: 0; }
 .status-grid span { color: hsl(var(--muted-foreground)); display: block; font-family: var(--app-font-mono); font-size: 9px; text-transform: uppercase; }
 .status-grid strong { display: block; font-size: 11px; margin-top: 6px; }
+.automation-control { align-items: center; background: hsl(var(--muted) / .38); border-bottom: 1px solid hsl(var(--border)); display: flex; gap: 18px; justify-content: space-between; padding: 15px 22px; }
+.automation-status { color: hsl(var(--foreground)); font-size: 11px; font-weight: 700; margin-top: 5px; }
+.automation-actions { align-items: center; display: flex; flex-shrink: 0; gap: 8px; }
+.automation-actions select { background: hsl(var(--card)); border: 1px solid hsl(var(--border)); color: hsl(var(--foreground)); font-family: var(--app-font-mono); font-size: 10px; min-height: 35px; padding: 0 9px; }
+.automation-error { align-items: flex-start; background: hsl(var(--destructive) / .08); border-bottom: 1px solid hsl(var(--destructive) / .2); color: hsl(var(--destructive)); display: flex; font-size: 10px; gap: 8px; line-height: 1.5; padding: 10px 22px; }
 .status-footer { align-items: center; display: flex; justify-content: space-between; padding: 13px 22px; }
 .activity-list { padding: 0 22px 8px; }
 .activity-row { align-items: flex-start; border-bottom: 1px solid hsl(var(--border)); display: flex; gap: 12px; padding: 15px 0; }
@@ -700,6 +705,9 @@
   .metric-value { font-size: 13px; }
   .metric-label { font-size: 9px; }
   .status-footer { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .automation-control { align-items: stretch; flex-direction: column; gap: 12px; }
+  .automation-actions { align-items: stretch; flex-direction: column; }
+  .automation-actions select, .automation-actions .button { width: 100%; }
   .card-header { padding-left: 16px; padding-right: 16px; }
   .activity-list { padding-left: 16px; padding-right: 16px; }
   .formula-box { align-items: flex-start; flex-direction: column; gap: 8px; }

@@ -47,6 +47,8 @@ import {
   useOptimizeBacktest,
   useRunBacktest,
   useRunStrategy,
+  useStartAgent,
+  useStopAgent,
 } from '@workspace/api-client-react';
 import type {
   AgentDashboard,
@@ -362,7 +364,27 @@ function AccountStrip({ account }: { account: AgentDashboard['account'] }) {
   );
 }
 
-function AgentStatusCard({ status, onFlatten, flattenPending }: { status: AgentStatus; onFlatten: () => void; flattenPending: boolean }) {
+function AgentStatusCard({
+  status,
+  onFlatten,
+  flattenPending,
+  onStart,
+  onStop,
+  startPending,
+  stopPending,
+  intervalSeconds,
+  onIntervalChange,
+}: {
+  status: AgentStatus;
+  onFlatten: () => void;
+  flattenPending: boolean;
+  onStart: () => void;
+  onStop: () => void;
+  startPending: boolean;
+  stopPending: boolean;
+  intervalSeconds: number;
+  onIntervalChange: (value: number) => void;
+}) {
   const [confirm, setConfirm] = useState(false);
   const enabledGuardrails = Object.entries(status.guardrails).filter(([key, value]) => typeof value === 'boolean' && value).length;
   return (
@@ -385,10 +407,36 @@ function AgentStatusCard({ status, onFlatten, flattenPending }: { status: AgentS
       </div>
       <div className="status-grid">
         <div><span>Last scan</span><strong>{formatDateTime(status.lastRunAt)}</strong></div>
-        <div><span>Next scan</span><strong>{formatDateTime(status.nextRunAt)}</strong></div>
+        <div><span>Next scan</span><strong>{status.running ? formatDateTime(status.nextRunAt) : 'Agent stopped'}</strong></div>
         <div><span>Heartbeat</span><strong className="font-mono text-[11px]">{status.heartbeat || '—'}</strong></div>
         <div><span>Guardrails</span><strong>{enabledGuardrails} / 6 live</strong></div>
       </div>
+      <div className="automation-control">
+        <div>
+          <div className="eyebrow">Continuous execution</div>
+          <div className="automation-status">{status.running ? `Running every ${status.intervalSeconds}s · strategy decides` : 'Stopped · no orders will be submitted'}</div>
+        </div>
+        <div className="automation-actions">
+          {!status.running && (
+            <select value={intervalSeconds} onChange={(event) => onIntervalChange(Number(event.target.value))} aria-label="Agent scan cadence" data-testid="select-agent-interval">
+              <option value={60}>Every 1 min</option>
+              <option value={300}>Every 5 min</option>
+              <option value={900}>Every 15 min</option>
+              <option value={1800}>Every 30 min</option>
+            </select>
+          )}
+          {status.running ? (
+            <button className="button button-secondary" onClick={onStop} disabled={stopPending} data-testid="button-stop-agent">
+              {stopPending ? <RefreshCw size={13} className="animate-spin" /> : <X size={13} />} Stop agent
+            </button>
+          ) : (
+            <button className="button button-primary" onClick={onStart} disabled={startPending} data-testid="button-start-agent">
+              {startPending ? <RefreshCw size={13} className="animate-spin" /> : <Play size={13} />} Start agent
+            </button>
+          )}
+        </div>
+      </div>
+      {status.lastError && <div className="automation-error"><AlertTriangle size={13} /><span>Last cycle failed: {status.lastError}</span></div>}
       <div className="status-footer">
         <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><LockKeyhole size={13} /> Paper-only lock engaged</div>
         {!confirm ? (
@@ -512,8 +560,11 @@ function DashboardPage() {
   const dashboardQuery = useGetAgentDashboard({ query: { queryKey: getGetAgentDashboardQueryKey(), refetchInterval: 30000 } });
   const runStrategy = useRunStrategy();
   const flatten = useFlattenAgentPositions();
+  const startAgent = useStartAgent();
+  const stopAgent = useStopAgent();
   const [selectedSymbol, setSelectedSymbol] = useState('');
   const [dryRun, setDryRun] = useState(false);
+  const [intervalSeconds, setIntervalSeconds] = useState(300);
   const [notice, setNotice] = useState('');
   const dashboard = dashboardQuery.data;
   const snapshots = dashboard?.snapshots ?? fallbackSnapshots;
@@ -541,6 +592,32 @@ function DashboardPage() {
       onError: () => setNotice('Flatten request failed. No positions were changed.'),
     });
   };
+  const startContinuousAgent = () => {
+    if (!dashboard?.status.symbols?.length) {
+      setNotice('No symbols are configured for this lane.');
+      return;
+    }
+    setNotice('');
+    startAgent.mutate({ data: { symbols: dashboard.status.symbols, intervalSeconds } }, {
+      onSuccess: (result) => {
+        setNotice(result.message);
+        queryClient.invalidateQueries({ queryKey: getGetAgentDashboardQueryKey() });
+        queryClient.invalidateQueries({ queryKey: getGetAgentStatusQueryKey() });
+      },
+      onError: () => setNotice('The agent could not start. No orders were submitted.'),
+    });
+  };
+  const stopContinuousAgent = () => {
+    setNotice('');
+    stopAgent.mutate(undefined, {
+      onSuccess: (result) => {
+        setNotice(result.message);
+        queryClient.invalidateQueries({ queryKey: getGetAgentDashboardQueryKey() });
+        queryClient.invalidateQueries({ queryKey: getGetAgentStatusQueryKey() });
+      },
+      onError: () => setNotice('The agent could not be stopped. Check the API connection.'),
+    });
+  };
   return (
     <>
       <PageIntro
@@ -555,7 +632,17 @@ function DashboardPage() {
           <AccountStrip account={dashboard.account} />
           <MetricRail metrics={dashboard.metrics} />
           <div className="dashboard-grid">
-            <AgentStatusCard status={dashboard.status} onFlatten={flattenPositions} flattenPending={flatten.isPending} />
+            <AgentStatusCard
+              status={dashboard.status}
+              onFlatten={flattenPositions}
+              flattenPending={flatten.isPending}
+              onStart={startContinuousAgent}
+              onStop={stopContinuousAgent}
+              startPending={startAgent.isPending}
+              stopPending={stopAgent.isPending}
+              intervalSeconds={intervalSeconds}
+              onIntervalChange={setIntervalSeconds}
+            />
             <div className="panel activity-panel">
               <CardHeader eyebrow="03 / event stream" title="Recent decisions" action={<Link href="/activity" className="text-link" data-testid="link-view-all-activity">View audit <ChevronRight size={13} /></Link>} />
               <ActivityList activity={dashboard.activity} compact />

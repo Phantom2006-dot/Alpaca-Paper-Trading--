@@ -51,6 +51,44 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AgentStatus"
+  /agent/start:
+    post:
+      operationId: startAgent
+      tags: [agent]
+      summary: Start the continuous paper-trading agent
+      description: Starts an interval-driven strategy loop. Each cycle evaluates the configured universe and may submit paper orders only when every guardrail passes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentAutomationInput"
+      responses:
+        "200":
+          description: Agent started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentAutomationResponse"
+        "400":
+          description: Invalid automation settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /agent/stop:
+    post:
+      operationId: stopAgent
+      tags: [agent]
+      summary: Stop the continuous paper-trading agent
+      description: Stops future strategy cycles without changing any open paper positions.
+      responses:
+        "200":
+          description: Agent stopped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentAutomationResponse"
   /agent/assets:
     get:
       operationId: getAgentAssets
@@ -575,6 +613,14 @@ components:
           type: ["string", "null"]
         nextRunAt:
           type: ["string", "null"]
+        running:
+          type: boolean
+        intervalSeconds:
+          type: number
+        startedAt:
+          type: ["string", "null"]
+        lastError:
+          type: ["string", "null"]
         symbols:
           type: array
           items:
@@ -583,7 +629,47 @@ components:
           type: string
         guardrails:
           $ref: "#/components/schemas/GuardrailState"
-      required: [mode, connected, paper, lastRunAt, nextRunAt, symbols, heartbeat, guardrails]
+      required: [mode, connected, paper, lastRunAt, nextRunAt, running, intervalSeconds, startedAt, lastError, symbols, heartbeat, guardrails]
+    AgentAutomationInput:
+      type: object
+      properties:
+        symbols:
+          type: array
+          items:
+            type: string
+            minLength: 1
+          minItems: 1
+          maxItems: 8
+        intervalSeconds:
+          type: number
+          minimum: 30
+          maximum: 3600
+      required: [symbols, intervalSeconds]
+    AgentAutomationResponse:
+      type: object
+      properties:
+        running:
+          type: boolean
+        mode:
+          type: string
+          enum: [paper, demo]
+        symbols:
+          type: array
+          items:
+            type: string
+        intervalSeconds:
+          type: number
+        startedAt:
+          type: ["string", "null"]
+        lastRunAt:
+          type: ["string", "null"]
+        nextRunAt:
+          type: ["string", "null"]
+        lastError:
+          type: ["string", "null"]
+        message:
+          type: string
+      required: [running, mode, symbols, intervalSeconds, startedAt, lastRunAt, nextRunAt, lastError, message]
     SymbolSnapshot:
       type: object
       properties:

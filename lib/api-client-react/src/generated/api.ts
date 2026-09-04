@@ -21,6 +21,8 @@ import type {
 
 import type {
   AgentAccountOverview,
+  AgentAutomationInput,
+  AgentAutomationResponse,
   AgentDashboard,
   AgentStatus,
   BacktestInput,
@@ -297,6 +299,150 @@ export function useGetAgentStatus<TData = Awaited<ReturnType<typeof getAgentStat
 
 
 
+
+export const getStartAgentUrl = () => {
+
+
+
+
+  return `/api/agent/start`
+}
+
+/**
+ * Starts an interval-driven strategy loop. Each cycle evaluates the configured universe and may submit paper orders only when every guardrail passes.
+ * @summary Start the continuous paper-trading agent
+ */
+export const startAgent = async (agentAutomationInput: AgentAutomationInput, options?: Parameters<typeof customFetch>[1]): Promise<AgentAutomationResponse> => {
+
+  return customFetch<AgentAutomationResponse>(getStartAgentUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(agentAutomationInput)
+  }
+);}
+
+
+
+
+
+export const getStartAgentMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startAgent>>, TError,{data: BodyType<AgentAutomationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startAgent>>, TError,{data: BodyType<AgentAutomationInput>}, TContext> => {
+
+const mutationKey = ['startAgent'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startAgent>>, {data: BodyType<AgentAutomationInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  startAgent(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StartAgentMutationResult = NonNullable<Awaited<ReturnType<typeof startAgent>>>
+    export type StartAgentMutationBody = BodyType<AgentAutomationInput>
+    export type StartAgentMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Start the continuous paper-trading agent
+ */
+export const useStartAgent = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startAgent>>, TError,{data: BodyType<AgentAutomationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof startAgent>>,
+        TError,
+        {data: BodyType<AgentAutomationInput>},
+        TContext
+      > => {
+      return useMutation(getStartAgentMutationOptions(options));
+    }
+
+export const getStopAgentUrl = () => {
+
+
+
+
+  return `/api/agent/stop`
+}
+
+/**
+ * Stops future strategy cycles without changing any open paper positions.
+ * @summary Stop the continuous paper-trading agent
+ */
+export const stopAgent = async ( options?: Parameters<typeof customFetch>[1]): Promise<AgentAutomationResponse> => {
+
+  return customFetch<AgentAutomationResponse>(getStopAgentUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getStopAgentMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof stopAgent>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof stopAgent>>, TError,void, TContext> => {
+
+const mutationKey = ['stopAgent'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof stopAgent>>, void> = () => {
+
+
+          return  stopAgent(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StopAgentMutationResult = NonNullable<Awaited<ReturnType<typeof stopAgent>>>
+
+    export type StopAgentMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Stop the continuous paper-trading agent
+ */
+export const useStopAgent = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof stopAgent>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof stopAgent>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getStopAgentMutationOptions(options));
+    }
 
 export const getGetAgentAssetsUrl = (params?: GetAgentAssetsParams,) => {
   const normalizedParams = new URLSearchParams();

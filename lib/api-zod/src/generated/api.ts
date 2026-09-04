@@ -28,6 +28,10 @@ export const GetAgentDashboardResponse = zod.object({
   "paper": zod.boolean(),
   "lastRunAt": zod.string().nullable(),
   "nextRunAt": zod.string().nullable(),
+  "running": zod.boolean(),
+  "intervalSeconds": zod.number(),
+  "startedAt": zod.string().nullable(),
+  "lastError": zod.string().nullable(),
   "symbols": zod.array(zod.string()),
   "heartbeat": zod.string(),
   "guardrails": zod.object({
@@ -102,6 +106,10 @@ export const GetAgentStatusResponse = zod.object({
   "paper": zod.boolean(),
   "lastRunAt": zod.string().nullable(),
   "nextRunAt": zod.string().nullable(),
+  "running": zod.boolean(),
+  "intervalSeconds": zod.number(),
+  "startedAt": zod.string().nullable(),
+  "lastError": zod.string().nullable(),
   "symbols": zod.array(zod.string()),
   "heartbeat": zod.string(),
   "guardrails": zod.object({
@@ -118,6 +126,53 @@ export const GetAgentStatusResponse = zod.object({
   "adxMax": zod.number(),
   "minVolumeRatio": zod.number()
 })
+})
+
+
+/**
+ * Starts an interval-driven strategy loop. Each cycle evaluates the configured universe and may submit paper orders only when every guardrail passes.
+ * @summary Start the continuous paper-trading agent
+ */
+
+export const startAgentBodySymbolsMax = 8;
+
+export const startAgentBodyIntervalSecondsMin = 30;
+export const startAgentBodyIntervalSecondsMax = 3600;
+
+
+
+export const StartAgentBody = zod.object({
+  "symbols": zod.array(zod.string().min(1)).min(1).max(startAgentBodySymbolsMax),
+  "intervalSeconds": zod.number().min(startAgentBodyIntervalSecondsMin).max(startAgentBodyIntervalSecondsMax)
+})
+
+export const StartAgentResponse = zod.object({
+  "running": zod.boolean(),
+  "mode": zod.enum(['paper', 'demo']),
+  "symbols": zod.array(zod.string()),
+  "intervalSeconds": zod.number(),
+  "startedAt": zod.string().nullable(),
+  "lastRunAt": zod.string().nullable(),
+  "nextRunAt": zod.string().nullable(),
+  "lastError": zod.string().nullable(),
+  "message": zod.string()
+})
+
+
+/**
+ * Stops future strategy cycles without changing any open paper positions.
+ * @summary Stop the continuous paper-trading agent
+ */
+export const StopAgentResponse = zod.object({
+  "running": zod.boolean(),
+  "mode": zod.enum(['paper', 'demo']),
+  "symbols": zod.array(zod.string()),
+  "intervalSeconds": zod.number(),
+  "startedAt": zod.string().nullable(),
+  "lastRunAt": zod.string().nullable(),
+  "nextRunAt": zod.string().nullable(),
+  "lastError": zod.string().nullable(),
+  "message": zod.string()
 })
 
 
