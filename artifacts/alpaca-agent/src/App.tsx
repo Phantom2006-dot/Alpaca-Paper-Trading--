@@ -170,8 +170,6 @@ function AppLogo() {
 
 function Shell({ children }: { children: ReactNode }) {
   const [location] = useLocation();
-  const { isSignedIn } = useAuth();
-  const { openSignIn } = useClerk();
   const [mobileNav, setMobileNav] = useState(false);
   const [killOpen, setKillOpen] = useState(false);
   const [killHalted, setKillHalted] = useState(false);
@@ -305,15 +303,7 @@ function Shell({ children }: { children: ReactNode }) {
               🛑 KILL
             </button>
             <div className="topbar-divider" />
-            {isSignedIn ? <UserButton /> : (
-              <button
-                className="button button-secondary"
-                style={{ fontSize: 11, padding: '4px 10px' }}
-                onClick={() => openSignIn({})}
-              >
-                Sign in
-              </button>
-            )}
+            {hasClerk && <AuthControls />}
           </div>
         </header>
         <div className="page-wrap">{children}</div>
@@ -1205,7 +1195,22 @@ function AuthenticatedLaunchAction({ className, children }: { className: string;
   );
 }
 
+function AuthControls() {
+  const { isSignedIn } = useAuth();
+  const { openSignIn } = useClerk();
+  return isSignedIn ? <UserButton /> : (
+    <button
+      className="button button-secondary"
+      style={{ fontSize: 11, padding: '4px 10px' }}
+      onClick={() => openSignIn({})}
+    >
+      Sign in
+    </button>
+  );
+}
+
 function LandingNav() {
+  const [menuOpen, setMenuOpen] = useState(false);
   return (
     <nav className="landing-nav">
       <div className="landing-nav-inner">
@@ -1213,13 +1218,32 @@ function LandingNav() {
           <div className="logo-mark" aria-hidden="true"><span /><span /><span /></div>
           <span>kai<strong>ro</strong></span>
         </Link>
-        <div className="landing-nav-links">
+        <div className={cx('landing-nav-links', menuOpen && 'is-open')}>
           <a href="#features">Features</a>
           <a href="#how-it-works">How it works</a>
           <a href="#pricing">Pricing</a>
+          <a href={TELEGRAM_BOT_URL} target="_blank" rel="noopener noreferrer">Telegram bot</a>
         </div>
         <LaunchAppAction className="button button-primary landing-cta-btn" />
+        <button
+          type="button"
+          className="landing-menu-button"
+          aria-label="Open navigation menu"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((open) => !open)}
+        >
+          <Menu size={18} />
+        </button>
       </div>
+      {menuOpen && (
+        <div className="landing-menu-panel">
+          <a href="#features" onClick={() => setMenuOpen(false)}>Features</a>
+          <a href="#how-it-works" onClick={() => setMenuOpen(false)}>How it works</a>
+          <a href="#pricing" onClick={() => setMenuOpen(false)}>Pricing</a>
+          <a href={TELEGRAM_BOT_URL} target="_blank" rel="noopener noreferrer">Open Telegram bot</a>
+          <LaunchAppAction className="button button-primary landing-menu-launch">Launch App</LaunchAppAction>
+        </div>
+      )}
     </nav>
   );
 }
@@ -1525,12 +1549,36 @@ function AuthenticatedRouter() {
   );
 }
 
+function DemoRouter() {
+  return (
+    <Route>
+      <Shell>
+        <Switch>
+          <Route path="/dashboard" component={DashboardPage} />
+          <Route path="/console" component={ConsolePage} />
+          <Route path="/trades" component={TradesPage} />
+          <Route path="/strategy" component={StrategyPage} />
+          <Route path="/backtest" component={BacktestPage} />
+          <Route path="/audit" component={AuditPage} />
+          <Route path="/activity" component={ActivityPage} />
+          <Route path="/risk" component={RiskPage} />
+          <Route path="/architecture" component={ArchitecturePage} />
+          <Route path="/settings" component={SettingsPage} />
+          <Route path="/account" component={AccountPage} />
+          <Route path="/credentials" component={CredentialsPage} />
+          <Route component={NotFound} />
+        </Switch>
+      </Shell>
+    </Route>
+  );
+}
+
 function Router() {
   return (
     <ErrorBoundary>
       <Switch>
         <Route path="/" component={LandingPage} />
-        {hasClerk ? <AuthenticatedRouter /> : <Route component={LandingPage} />}
+        {hasClerk ? <AuthenticatedRouter /> : <DemoRouter />}
       </Switch>
     </ErrorBoundary>
   );

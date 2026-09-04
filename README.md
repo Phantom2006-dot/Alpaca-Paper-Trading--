@@ -168,6 +168,8 @@ ALPACA_API_SECRET=<your_paper_secret>
 
 The public landing page still renders if the Vite key is missing, but authenticated app routes require Clerk when the key is configured. Alpaca credentials entered in the Credentials page are stored in server memory and scoped to the signed-in Clerk user. The execution adapter remains locked to `paper-api.alpaca.markets`.
 
+For a deployed frontend, set `VITE_API_URL` in Vercel to the public HTTPS URL of the deployed API server, for example `https://your-api.example.com`. The API server must also have `CLERK_SECRET_KEY`, enable the frontend origin in CORS, and be reachable over HTTPS. Do not point a production frontend at `localhost:8080`.
+
 ### Build
 
 ```bash
@@ -204,6 +206,7 @@ pnpm --filter @workspace/db run push
 | `ALPACA_API_SECRET` | Optional | Enables paper mode |
 | `CLERK_SECRET_KEY` | Required for protected API routes | Verifies Clerk bearer tokens |
 | `VITE_CLERK_PUBLISHABLE_KEY` | Optional local fallback; required for sign-in | Enables Clerk in the Vite app; stored in `artifacts/alpaca-agent/.env.local` |
+| `VITE_API_URL` | Optional locally; required for separate production API | Public base URL for the Express API server |
 | `DATABASE_URL` | Optional | DB tooling only; not used by agent routes |
 | `PORT` | Optional | API server port (default: 8080) |
 
