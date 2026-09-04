@@ -1,5 +1,6 @@
 import { type ReactNode, useMemo, useState } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Activity,
   AlertTriangle,
@@ -27,6 +28,18 @@ import {
   WalletCards,
   X,
   Zap,
+  ArrowRight,
+  Brain,
+  LineChart,
+  Shield,
+  Layers,
+  GitBranch,
+  Eye,
+  Star,
+  Sparkles,
+  CircleCheck,
+  Rocket,
+  Building2,
 } from 'lucide-react';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
@@ -64,16 +77,23 @@ import type {
   TradableAsset,
 } from '@workspace/api-client-react';
 import { Link, Route, Switch, Router as WouterRouter, useLocation } from 'wouter';
+import { ConsolePage } from '@/pages/ConsolePage';
+import { AuditPage } from '@/pages/AuditPage';
+import { RiskPage } from '@/pages/RiskPage';
+import { ArchitecturePage } from '@/pages/ArchitecturePage';
+import { KillSwitchModal } from '@/components/KillSwitchModal';
 
 const queryClient = new QueryClient();
 
 const navItems = [
-  { href: '/', label: 'Control room', short: 'CTRL', icon: LayoutDashboard },
-  { href: '/strategy', label: 'Strategy logic', short: 'LOGIC', icon: BrainCircuit },
-  { href: '/backtest', label: 'Backtest', short: 'TEST', icon: Database },
-  { href: '/activity', label: 'Activity log', short: 'AUDIT', icon: ListChecks },
-  { href: '/settings', label: 'Settings', short: 'SETUP', icon: SlidersHorizontal },
+  { href: '/', label: 'Dashboard', short: 'DASH', icon: LayoutDashboard },
+  { href: '/console', label: 'AI Console', short: 'CONSOLE', icon: BrainCircuit },
+  { href: '/strategy', label: 'Strategy logic', short: 'LOGIC', icon: SlidersHorizontal },
+  { href: '/backtest', label: 'Backtester', short: 'TEST', icon: Database },
+  { href: '/audit', label: 'Audit trail', short: 'AUDIT', icon: ListChecks },
+  { href: '/risk', label: 'Risk engine', short: 'RISK', icon: ShieldCheck },
   { href: '/account', label: 'Account & orders', short: 'ACCOUNT', icon: WalletCards },
+  { href: '/architecture', label: 'Architecture', short: 'ARCH', icon: GitBranch },
 ];
 
 const fallbackSnapshots: SymbolSnapshot[] = [];
@@ -141,15 +161,51 @@ function AppLogo() {
 function Shell({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const [mobileNav, setMobileNav] = useState(false);
+  const [killOpen, setKillOpen] = useState(false);
+  const [killHalted, setKillHalted] = useState(false);
   const statusQuery = useGetAgentStatus({ query: { queryKey: getGetAgentStatusQueryKey(), refetchInterval: 30000 } });
   const healthQuery = useHealthCheck({ query: { queryKey: ['health-check'], refetchInterval: 30000 } });
+  const flatten = useFlattenAgentPositions();
+  const stopAgent = useStopAgent();
+  const queryClient = useQueryClient();
   const status = statusQuery.data;
   const isDemo = status?.mode === 'demo';
   const isPaperHealthy = status?.mode === 'paper' && status.connected;
   const healthOk = healthQuery.data?.status === 'ok' || healthQuery.data?.status === 'healthy';
 
+  const agentStatusLabel = killHalted ? 'HALTED' : status?.running ? 'ANALYZING' : status?.connected ? 'ONLINE' : 'IDLE';
+  const agentStatusClass = killHalted ? 'is-halted' : status?.running ? 'is-analyzing' : status?.connected ? 'is-online' : 'is-idle';
+
+  function handleKillConfirm() {
+    flatten.mutate(undefined, {
+      onSuccess: () => {
+        stopAgent.mutate(undefined, {
+          onSuccess: () => {
+            setKillHalted(true);
+            setKillOpen(false);
+            queryClient.invalidateQueries({ queryKey: getGetAgentStatusQueryKey() });
+            queryClient.invalidateQueries({ queryKey: getGetAgentDashboardQueryKey() });
+          },
+        });
+      },
+    });
+  }
+
   return (
-    <div className="min-h-[100dvh] bg-background text-foreground">
+    <div className={cx('min-h-[100dvh] bg-background text-foreground', killHalted && 'is-halted-state')}>
+      <KillSwitchModal
+        open={killOpen}
+        onClose={() => setKillOpen(false)}
+        onConfirm={handleKillConfirm}
+        pending={flatten.isPending || stopAgent.isPending}
+      />
+      {killHalted && (
+        <div className="halt-banner">
+          <AlertTriangle size={14} />
+          <span>AGENT HALTED — All positions flattened. Restart the agent to resume operations.</span>
+          <button onClick={() => setKillHalted(false)} className="halt-banner-dismiss"><X size={13} /></button>
+        </div>
+      )}
       <aside className={cx('app-sidebar', mobileNav && 'is-open')}>
         <div className="flex items-center justify-between px-5 py-5 lg:block lg:px-7 lg:py-7">
           <Link href="/" className="inline-flex" data-testid="link-sidebar-logo">
@@ -207,19 +263,35 @@ function Shell({ children }: { children: ReactNode }) {
             <div className="topbar-breadcrumb">
               <span>ALPACA AGENT</span>
               <ChevronRight size={12} />
-              <strong>{navItems.find((item) => item.href === location)?.short ?? 'CTRL'}</strong>
+              <strong>{navItems.find((item) => item.href === location)?.short ?? 'DASH'}</strong>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <div className={cx('mode-pill', isDemo ? 'is-demo' : 'is-paper')} data-testid="status-execution-mode">
-              <span className="mode-pill-dot" />
-              {statusQuery.isLoading ? 'SYNCING' : isDemo ? 'DEMO MODE' : isPaperHealthy ? 'PAPER CONNECTED' : 'PAPER NEEDS ATTENTION'}
+          <div className="flex items-center gap-2">
+            {/* Paper trading badge — always visible */}
+            <div className="paper-badge" data-testid="badge-paper-trading">
+              🟡 PAPER TRADING ONLY
+            </div>
+            {/* Agent status badge */}
+            <div className={cx('agent-status-badge', agentStatusClass)} data-testid="badge-agent-status">
+              <span className="agent-status-dot" />
+              {agentStatusLabel}
             </div>
             <div className="topbar-divider" />
-            <div className="hidden items-center gap-2 font-mono text-[10px] text-muted-foreground sm:flex">
-              <Command size={13} />
-              <span>R1.0.4</span>
+            {/* Mode pill */}
+            <div className={cx('mode-pill', isDemo ? 'is-demo' : 'is-paper')} data-testid="status-execution-mode">
+              <span className="mode-pill-dot" />
+              {statusQuery.isLoading ? 'SYNCING' : isDemo ? 'DEMO' : isPaperHealthy ? 'PAPER' : 'ATTENTION'}
             </div>
+            <div className="topbar-divider" />
+            {/* Kill switch */}
+            <button
+              className="kill-switch-btn"
+              onClick={() => setKillOpen(true)}
+              disabled={killHalted}
+              data-testid="button-kill-switch"
+            >
+              🛑 KILL
+            </button>
           </div>
         </header>
         <div className="page-wrap">{children}</div>
@@ -496,7 +568,7 @@ function SnapshotTable({ snapshots, onSelect }: { snapshots: SymbolSnapshot[]; o
       {snapshots.length === 0 ? <EmptyState title="No symbols in the lane" description="Once the agent has a symbol universe, each indicator decision will appear here." /> : (
         <div className="table-scroll">
           <table className="data-table">
-            <thead><tr><th>Symbol</th><th>Price</th><th>Z-score</th><th>ADX</th><th>Volume</th><th>Position</th><th>Signal</th><th>State</th></tr></thead>
+            <thead><tr><th>Symbol</th><th>Price</th><th>Z-score</th><th>ADX</th><th>Volume</th><th>Position</th><th>Signal</th><th>Cluster</th><th>State</th></tr></thead>
             <tbody>
               {snapshots.map((snapshot) => (
                 <tr key={snapshot.symbol} onClick={() => onSelect(snapshot.symbol)} data-testid={`row-symbol-${snapshot.symbol}`}>
@@ -507,6 +579,7 @@ function SnapshotTable({ snapshots, onSelect }: { snapshots: SymbolSnapshot[]; o
                   <td><div className="volume-cell"><span className="volume-bar"><i style={{ width: `${Math.min(snapshot.volumeRatio * 35, 100)}%` }} /></span><span>{snapshot.volumeRatio.toFixed(2)}x</span></div></td>
                   <td className="text-xs">{snapshot.positionQty ? `${snapshot.positionQty} ${snapshot.positionSide}` : 'Flat'}</td>
                   <td><SignalBadge signal={snapshot.signal} /></td>
+                  <td className="font-mono text-[10px] text-muted-foreground">{(snapshot as any).cluster ?? '—'}</td>
                   <td><span className={cx('trade-state', snapshot.tradeBlockedReason ? 'is-blocked' : 'is-clear')}>{snapshot.tradeBlockedReason ? 'held' : 'clear'}</span></td>
                 </tr>
               ))}
@@ -564,6 +637,7 @@ function DashboardPage() {
   const stopAgent = useStopAgent();
   const [selectedSymbol, setSelectedSymbol] = useState('');
   const [dryRun, setDryRun] = useState(false);
+  const [strategyMode, setStrategyMode] = useState<'zscore' | 'ict_hmm'>('zscore');
   const [intervalSeconds, setIntervalSeconds] = useState(300);
   const [notice, setNotice] = useState('');
   const dashboard = dashboardQuery.data;
@@ -574,7 +648,7 @@ function DashboardPage() {
       return;
     }
     setNotice('');
-    runStrategy.mutate({ data: { symbols: dashboard.status.symbols, dryRun } }, {
+    runStrategy.mutate({ data: { symbols: dashboard.status.symbols, dryRun, strategyMode } as any }, {
       onSuccess: (result) => {
         setNotice(`Scan complete · ${result.evaluated} symbols evaluated · ${result.actions.length} actions`);
         queryClient.invalidateQueries({ queryKey: getGetAgentDashboardQueryKey() });
@@ -598,7 +672,7 @@ function DashboardPage() {
       return;
     }
     setNotice('');
-    startAgent.mutate({ data: { symbols: dashboard.status.symbols, intervalSeconds } }, {
+    startAgent.mutate({ data: { symbols: dashboard.status.symbols, intervalSeconds, strategyMode } as any }, {
       onSuccess: (result) => {
         setNotice(result.message);
         queryClient.invalidateQueries({ queryKey: getGetAgentDashboardQueryKey() });
@@ -624,7 +698,12 @@ function DashboardPage() {
         eyebrow="Live agent / control room"
         title="Good decisions leave a trail."
         description="See what the agent sees, why it waits, and where every paper order came from."
-        action={<div className="flex items-center gap-2"><label className="dry-run-toggle"><input type="checkbox" checked={dryRun} onChange={(event) => setDryRun(event.target.checked)} data-testid="input-dry-run" /><span className="toggle-track" /><span>Preview only</span></label><button className="button button-primary" onClick={runScan} disabled={runStrategy.isPending || dashboardQuery.isLoading} data-testid="button-run-scan">{runStrategy.isPending ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />} Run scan</button></div>}
+        action={<div className="flex items-center gap-2">
+          <select value={strategyMode} onChange={(e) => setStrategyMode(e.target.value as 'zscore' | 'ict_hmm')} aria-label="Strategy mode" data-testid="select-strategy-mode" className="text-xs border border-border rounded px-2 py-1 bg-background">
+            <option value="zscore">Z-score + ADX</option>
+            <option value="ict_hmm">ICT / HMM 5-cluster</option>
+          </select>
+          <label className="dry-run-toggle"><input type="checkbox" checked={dryRun} onChange={(event) => setDryRun(event.target.checked)} data-testid="input-dry-run" /><span className="toggle-track" /><span>Preview only</span></label><button className="button button-primary" onClick={runScan} disabled={runStrategy.isPending || dashboardQuery.isLoading} data-testid="button-run-scan">{runStrategy.isPending ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />} Run scan</button></div>}
       />
       {notice && <div className="notice-banner" data-testid="status-action-notice"><Info size={14} /><span>{notice}</span><button onClick={() => setNotice('')} aria-label="Dismiss notice" data-testid="button-dismiss-notice"><X size={14} /></button></div>}
       {dashboardQuery.isLoading ? <LoadingPanel rows={6} /> : dashboardQuery.isError || !dashboard ? <ErrorPanel onRetry={() => dashboardQuery.refetch()} /> : (
@@ -1032,12 +1111,367 @@ function SettingsPage() {
   );
 }
 
+// ─── ANIMATION VARIANTS ──────────────────────────────────────────────────────
+const fadeUp = {
+  hidden: { opacity: 0, y: 28 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.55, ease: 'easeOut' as const } },
+};
+const stagger = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.09 } },
+};
+const fadeIn = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { duration: 0.5 } },
+};
+
+// ─── LANDING PAGE ─────────────────────────────────────────────────────────────
+
+const TICKER_SYMBOLS = ['SPY +0.84%', 'QQQ +1.12%', 'AAPL +0.63%', 'NVDA +2.41%', 'TSLA -0.38%', 'IWM +0.55%', 'MSFT +0.91%', 'AMZN +1.07%'];
+
+function TickerBar() {
+  const doubled = [...TICKER_SYMBOLS, ...TICKER_SYMBOLS];
+  return (
+    <div className="ticker-bar" aria-hidden="true">
+      <motion.div
+        className="ticker-track"
+        animate={{ x: ['0%', '-50%'] }}
+        transition={{ duration: 22, repeat: Infinity, ease: 'linear' }}
+      >
+        {doubled.map((item, i) => (
+          <span key={i} className={cx('ticker-item', item.includes('-') ? 'is-down' : 'is-up')}>
+            {item}
+          </span>
+        ))}
+      </motion.div>
+    </div>
+  );
+}
+
+function LandingNav() {
+  return (
+    <nav className="landing-nav">
+      <div className="landing-nav-inner">
+        <Link href="/landing" className="landing-logo">
+          <div className="logo-mark" aria-hidden="true"><span /><span /><span /></div>
+          <span>alpaca<strong>agent</strong></span>
+        </Link>
+        <div className="landing-nav-links">
+          <a href="#features">Features</a>
+          <a href="#how-it-works">How it works</a>
+          <a href="#pricing">Pricing</a>
+        </div>
+        <Link href="/" className="button button-primary landing-cta-btn">
+          Launch App <ArrowRight size={14} />
+        </Link>
+      </div>
+    </nav>
+  );
+}
+
+function HeroSection() {
+  return (
+    <section className="landing-hero">
+      <TickerBar />
+      <motion.div className="landing-hero-content" variants={stagger} initial="hidden" animate="show">
+        <motion.div variants={fadeUp} className="landing-eyebrow">
+          <span className="landing-badge"><Sparkles size={11} /> Paper trading · AI-powered · Fully explainable</span>
+        </motion.div>
+        <motion.h1 variants={fadeUp} className="landing-headline">
+          The trading agent that<br />
+          <span className="landing-headline-accent">shows its work.</span>
+        </motion.h1>
+        <motion.p variants={fadeUp} className="landing-subheadline">
+          Alpaca Agent runs Z-score mean-reversion and ICT/SMC + HMM strategies on your paper account.
+          Every decision is logged, every guardrail is visible, every order is explained.
+        </motion.p>
+        <motion.div variants={fadeUp} className="landing-hero-actions">
+          <Link href="/" className="button button-primary landing-hero-btn">
+            <Rocket size={15} /> Start for free
+          </Link>
+          <a href="#how-it-works" className="button button-secondary landing-hero-btn">
+            See how it works
+          </a>
+        </motion.div>
+        <motion.div variants={fadeUp} className="landing-hero-stats">
+          {[['Paper only', 'Zero live risk'], ['2 strategy modes', 'Z-score + ICT/HMM'], ['6 guardrails', 'Every order gated'], ['Full audit trail', 'Nothing off-book']].map(([val, label]) => (
+            <div key={val} className="landing-stat">
+              <strong>{val}</strong>
+              <span>{label}</span>
+            </div>
+          ))}
+        </motion.div>
+      </motion.div>
+      <motion.div
+        className="landing-hero-visual"
+        initial={{ opacity: 0, scale: 0.94 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.8, delay: 0.3, ease: 'easeOut' as const }}
+      >
+        <div className="hero-terminal">
+          <div className="hero-terminal-bar"><span /><span /><span /></div>
+          <div className="hero-terminal-body">
+            {[
+              { t: 'SCAN', sym: 'SPY', z: '+2.14σ', sig: 'long_entry', cls: 'is-signal' },
+              { t: 'BLOCK', sym: 'QQQ', z: '+1.87σ', sig: 'adx 28.4 > 25', cls: 'is-blocked' },
+              { t: 'HOLD', sym: 'IWM', z: '+0.43σ', sig: 'hold', cls: 'is-hold' },
+              { t: 'EXIT', sym: 'AAPL', z: '-0.12σ', sig: 'equilibrium', cls: 'is-exit' },
+            ].map((row, i) => (
+              <motion.div
+                key={row.sym}
+                className="hero-terminal-row"
+                initial={{ opacity: 0, x: 16 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.6 + i * 0.15, duration: 0.4 }}
+              >
+                <span className={cx('hero-sig', row.cls)}>{row.t}</span>
+                <strong>{row.sym}</strong>
+                <span className="hero-z">{row.z}</span>
+                <span className="hero-reason">{row.sig}</span>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </motion.div>
+    </section>
+  );
+}
+
+const FEATURES = [
+  { icon: Brain, title: 'Dual strategy engine', desc: 'Switch between Z-score mean-reversion + ADX and the full ICT/SMC + HMM 5-cluster engine per scan.' },
+  { icon: Eye, title: 'Full explainability', desc: 'Every signal, block, and order carries a human-readable reason. Nothing enters the order lane silently.' },
+  { icon: Shield, title: '6-layer guardrails', desc: 'Volume filter, ADX gate, hard invalidation, trailing stop, duplicate check, and paper-only lock.' },
+  { icon: LineChart, title: 'Historical backtest', desc: 'Replay any date range against Alpaca market data. Optimize thresholds across 72 parameter combinations.' },
+  { icon: Layers, title: 'Automation loop', desc: 'Set a scan cadence and let the agent run continuously. The in-flight guard prevents overlapping cycles.' },
+  { icon: GitBranch, title: 'Audit trail', desc: 'Every scan decision is logged with timestamp, Z-score, action, and reason. Filter by status.' },
+];
+
+function FeaturesSection() {
+  return (
+    <section className="landing-section" id="features">
+      <motion.div className="landing-section-header" variants={stagger} initial="hidden" whileInView="show" viewport={{ once: true, margin: '-80px' }}>
+        <motion.div variants={fadeUp} className="landing-eyebrow">What you get</motion.div>
+        <motion.h2 variants={fadeUp} className="landing-section-title">Built for operators who want to understand every trade.</motion.h2>
+      </motion.div>
+      <motion.div className="features-grid" variants={stagger} initial="hidden" whileInView="show" viewport={{ once: true, margin: '-60px' }}>
+        {FEATURES.map(({ icon: Icon, title, desc }) => (
+          <motion.div key={title} variants={fadeUp} className="feature-card">
+            <div className="feature-icon"><Icon size={20} /></div>
+            <h3>{title}</h3>
+            <p>{desc}</p>
+          </motion.div>
+        ))}
+      </motion.div>
+    </section>
+  );
+}
+
+const STEPS = [
+  { n: '01', title: 'Connect Alpaca', desc: 'Add your Alpaca paper API key. No live trading credentials accepted. Demo mode works with zero setup.' },
+  { n: '02', title: 'Choose your strategy', desc: 'Pick Z-score + ADX for mean-reversion or ICT/HMM 5-cluster for institutional structure analysis.' },
+  { n: '03', title: 'Run a scan or automate', desc: 'One-shot scan or continuous loop. The agent evaluates every symbol, applies all guardrails, and logs the outcome.' },
+  { n: '04', title: 'Read the audit trail', desc: 'Every decision is explained. See why the agent entered, blocked, or exited — with the exact indicator values.' },
+];
+
+function HowItWorksSection() {
+  return (
+    <section className="landing-section landing-section-alt" id="how-it-works">
+      <motion.div className="landing-section-header" variants={stagger} initial="hidden" whileInView="show" viewport={{ once: true, margin: '-80px' }}>
+        <motion.div variants={fadeUp} className="landing-eyebrow">How it works</motion.div>
+        <motion.h2 variants={fadeUp} className="landing-section-title">From API key to explained paper order in four steps.</motion.h2>
+      </motion.div>
+      <motion.div className="steps-grid" variants={stagger} initial="hidden" whileInView="show" viewport={{ once: true, margin: '-60px' }}>
+        {STEPS.map(({ n, title, desc }, i) => (
+          <motion.div key={n} variants={fadeUp} className="step-card">
+            <div className="step-number">{n}</div>
+            <h3>{title}</h3>
+            <p>{desc}</p>
+            {i < STEPS.length - 1 && <div className="step-connector" />}
+          </motion.div>
+        ))}
+      </motion.div>
+    </section>
+  );
+}
+
+const OFFER_ITEMS = [
+  {
+    tag: 'Strategy A',
+    title: 'Z-score Mean Reversion + ADX',
+    desc: 'Classic statistical arbitrage. Price deviates from its 20-bar SMA, ADX confirms the regime is not trending, volume clears the floor. Entry is symmetric, exit is patient.',
+    bullets: ['20-bar SMA / stddev band', 'ADX trend filter (default < 25)', 'Volume ratio floor', '2% trailing stop', 'Hard invalidation at 3.5σ'],
+    accent: 'offer-card-a',
+  },
+  {
+    tag: 'Strategy B',
+    title: 'ICT / SMC + HMM 5-Cluster',
+    desc: 'Institutional structure analysis. A 3-state HMM classifies the regime, ICT/SMC features detect FVGs, BoS, CHoCH, and liquidity sweeps. The 5-cluster router gates entries by AWD ≥ 0.65.',
+    bullets: ['3-state HMM regime classifier', 'FVG, BoS, CHoCH, sweep detection', 'AWD = 0.45×HMM + 0.35×TMA + 0.20×vol', '5 clusters: A–E', 'Causal, closed-bar only'],
+    accent: 'offer-card-b',
+  },
+];
+
+function WhatWeOfferSection() {
+  return (
+    <section className="landing-section" id="offer">
+      <motion.div className="landing-section-header" variants={stagger} initial="hidden" whileInView="show" viewport={{ once: true, margin: '-80px' }}>
+        <motion.div variants={fadeUp} className="landing-eyebrow">What we offer</motion.div>
+        <motion.h2 variants={fadeUp} className="landing-section-title">Two strategy engines. One explainable cockpit.</motion.h2>
+      </motion.div>
+      <motion.div className="offer-grid" variants={stagger} initial="hidden" whileInView="show" viewport={{ once: true, margin: '-60px' }}>
+        {OFFER_ITEMS.map(({ tag, title, desc, bullets, accent }) => (
+          <motion.div key={tag} variants={fadeUp} className={cx('offer-card', accent)}>
+            <div className="offer-tag">{tag}</div>
+            <h3>{title}</h3>
+            <p>{desc}</p>
+            <ul>
+              {bullets.map((b) => (
+                <li key={b}><CircleCheck size={13} />{b}</li>
+              ))}
+            </ul>
+          </motion.div>
+        ))}
+      </motion.div>
+    </section>
+  );
+}
+
+const PLANS = [
+  {
+    name: 'Free',
+    price: '$0',
+    period: 'forever',
+    desc: 'Full access to the paper trading cockpit. No credit card required.',
+    icon: Star,
+    features: ['Z-score + ADX strategy', 'Demo mode (no API key needed)', 'Manual scan + one-shot run', 'Activity audit trail', '4 default symbols', 'Paper-only execution lock'],
+    cta: 'Start free',
+    href: '/',
+    highlight: false,
+  },
+  {
+    name: 'Pro',
+    price: '$29',
+    period: 'per month',
+    desc: 'Both strategy engines, automation, backtest, and optimization.',
+    icon: Zap,
+    features: ['Everything in Free', 'ICT / HMM 5-cluster engine', 'Continuous automation loop', 'Historical backtest (180 days)', 'Strategy optimizer (72 candidates)', 'Up to 8 symbols', 'Priority support'],
+    cta: 'Start Pro',
+    href: '/',
+    highlight: true,
+  },
+  {
+    name: 'Institutional',
+    price: 'Custom',
+    period: 'contact us',
+    desc: 'Multi-account, custom strategy integration, and dedicated support.',
+    icon: Building2,
+    features: ['Everything in Pro', 'Multi-account management', 'Custom strategy modules', 'Dedicated infrastructure', 'SLA + uptime guarantee', 'Onboarding & training', 'API access'],
+    cta: 'Contact us',
+    href: '/',
+    highlight: false,
+  },
+];
+
+function PricingSection() {
+  return (
+    <section className="landing-section landing-section-alt" id="pricing">
+      <motion.div className="landing-section-header" variants={stagger} initial="hidden" whileInView="show" viewport={{ once: true, margin: '-80px' }}>
+        <motion.div variants={fadeUp} className="landing-eyebrow">Pricing</motion.div>
+        <motion.h2 variants={fadeUp} className="landing-section-title">Start free. Scale when you're ready.</motion.h2>
+        <motion.p variants={fadeUp} className="landing-section-sub">All plans include paper-only execution. No live trading, no hidden fees.</motion.p>
+      </motion.div>
+      <motion.div className="pricing-grid" variants={stagger} initial="hidden" whileInView="show" viewport={{ once: true, margin: '-60px' }}>
+        {PLANS.map(({ name, price, period, desc, icon: Icon, features, cta, href, highlight }) => (
+          <motion.div key={name} variants={fadeUp} className={cx('pricing-card', highlight && 'is-highlight')}>
+            {highlight && <div className="pricing-badge"><Sparkles size={11} /> Most popular</div>}
+            <div className="pricing-header">
+              <div className="pricing-icon"><Icon size={18} /></div>
+              <div>
+                <div className="pricing-name">{name}</div>
+                <div className="pricing-price">{price}<span>/{period}</span></div>
+              </div>
+            </div>
+            <p className="pricing-desc">{desc}</p>
+            <ul className="pricing-features">
+              {features.map((f) => (
+                <li key={f}><CircleCheck size={13} />{f}</li>
+              ))}
+            </ul>
+            <Link href={href} className={cx('button pricing-btn', highlight ? 'button-primary' : 'button-secondary')}>
+              {cta} <ArrowRight size={13} />
+            </Link>
+          </motion.div>
+        ))}
+      </motion.div>
+    </section>
+  );
+}
+
+function LandingFooter() {
+  return (
+    <footer className="landing-footer">
+      <div className="landing-footer-inner">
+        <div className="landing-footer-brand">
+          <div className="logo-mark" aria-hidden="true"><span /><span /><span /></div>
+          <span>alpaca<strong>agent</strong></span>
+        </div>
+        <div className="landing-footer-links">
+          <a href="#features">Features</a>
+          <a href="#how-it-works">How it works</a>
+          <a href="#pricing">Pricing</a>
+          <Link href="/">Launch app</Link>
+        </div>
+        <div className="landing-footer-note">Paper trading only · No live order routing · Built on Alpaca Markets API</div>
+      </div>
+    </footer>
+  );
+}
+
+function LandingPage() {
+  return (
+    <div className="landing-root">
+      <LandingNav />
+      <HeroSection />
+      <FeaturesSection />
+      <HowItWorksSection />
+      <WhatWeOfferSection />
+      <PricingSection />
+      <LandingFooter />
+    </div>
+  );
+}
+
+// ─── END LANDING PAGE ─────────────────────────────────────────────────────────
+
 function NotFound() {
   return <div className="panel mx-auto mt-16 max-w-lg p-10 text-center"><div className="eyebrow">404 / off course</div><h1 className="mt-3 font-display text-3xl font-bold">This coordinate is not mapped.</h1><p className="mt-3 text-sm text-muted-foreground">Return to the control room to continue.</p><Link href="/" className="button button-primary mt-6" data-testid="link-not-found-home">Back to control room</Link></div>;
 }
 
 function Router() {
-  return <ErrorBoundary><Shell><Switch><Route path="/" component={DashboardPage} /><Route path="/strategy" component={StrategyPage} /><Route path="/backtest" component={BacktestPage} /><Route path="/activity" component={ActivityPage} /><Route path="/settings" component={SettingsPage} /><Route path="/account" component={AccountPage} /><Route component={NotFound} /></Switch></Shell></ErrorBoundary>;
+  return (
+    <ErrorBoundary>
+      <Switch>
+        <Route path="/landing" component={LandingPage} />
+        <Route>
+          <Shell>
+            <Switch>
+              <Route path="/" component={DashboardPage} />
+              <Route path="/console" component={ConsolePage} />
+              <Route path="/strategy" component={StrategyPage} />
+              <Route path="/backtest" component={BacktestPage} />
+              <Route path="/audit" component={AuditPage} />
+              <Route path="/activity" component={ActivityPage} />
+              <Route path="/risk" component={RiskPage} />
+              <Route path="/architecture" component={ArchitecturePage} />
+              <Route path="/settings" component={SettingsPage} />
+              <Route path="/account" component={AccountPage} />
+              <Route component={NotFound} />
+            </Switch>
+          </Shell>
+        </Route>
+      </Switch>
+    </ErrorBoundary>
+  );
 }
 
 function App() {

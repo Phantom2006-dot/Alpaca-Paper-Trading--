@@ -300,6 +300,9 @@ components:
         feed:
           type: string
           enum: [iex, sip, delayed_sip]
+        strategyMode:
+          type: string
+          enum: [zscore, ict_hmm]
       required: [symbols, start, end, initialCapital]
     OptimizeBacktestInput:
       type: object
@@ -644,6 +647,9 @@ components:
           type: number
           minimum: 30
           maximum: 3600
+        strategyMode:
+          type: string
+          enum: [zscore, ict_hmm]
       required: [symbols, intervalSeconds]
     AgentAutomationResponse:
       type: object
@@ -703,10 +709,12 @@ components:
           enum: [long_entry, short_entry, exit, hold, blocked, invalidation]
         regime:
           type: string
-          enum: [mean_reverting, trending, insufficient_data]
+          enum: [mean_reverting, trending, insufficient_data, expansion, retracement, consolidation]
         updatedAt:
           type: string
         tradeBlockedReason:
+          type: ["string", "null"]
+        cluster:
           type: ["string", "null"]
       required:
         - symbol
@@ -725,6 +733,7 @@ components:
         - regime
         - updatedAt
         - tradeBlockedReason
+        - cluster
     StrategyActivity:
       type: object
       properties:
@@ -790,6 +799,9 @@ components:
           type: boolean
         settings:
           $ref: "#/components/schemas/OptimizationSettings"
+        strategyMode:
+          type: string
+          enum: [zscore, ict_hmm]
       required: [symbols, dryRun]
     StrategyRunResult:
       type: object

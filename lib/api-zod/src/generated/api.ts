@@ -71,9 +71,10 @@ export const GetAgentDashboardResponse = zod.object({
   "positionSide": zod.enum(['flat', 'long', 'short']),
   "unrealizedPnl": zod.number(),
   "signal": zod.enum(['long_entry', 'short_entry', 'exit', 'hold', 'blocked', 'invalidation']),
-  "regime": zod.enum(['mean_reverting', 'trending', 'insufficient_data']),
+  "regime": zod.enum(['mean_reverting', 'trending', 'insufficient_data', 'expansion', 'retracement', 'consolidation']),
   "updatedAt": zod.string(),
-  "tradeBlockedReason": zod.string().nullable()
+  "tradeBlockedReason": zod.string().nullable(),
+  "cluster": zod.string().nullable()
 })),
   "activity": zod.array(zod.object({
   "id": zod.string(),
@@ -143,7 +144,8 @@ export const startAgentBodyIntervalSecondsMax = 3600;
 
 export const StartAgentBody = zod.object({
   "symbols": zod.array(zod.string().min(1)).min(1).max(startAgentBodySymbolsMax),
-  "intervalSeconds": zod.number().min(startAgentBodyIntervalSecondsMin).max(startAgentBodyIntervalSecondsMax)
+  "intervalSeconds": zod.number().min(startAgentBodyIntervalSecondsMin).max(startAgentBodyIntervalSecondsMax),
+  "strategyMode": zod.enum(['zscore', 'ict_hmm']).optional()
 })
 
 export const StartAgentResponse = zod.object({
@@ -249,7 +251,8 @@ export const RunStrategyBody = zod.object({
   "entryZ": zod.number(),
   "adxMax": zod.number(),
   "minVolumeRatio": zod.number()
-}).optional()
+}).optional(),
+  "strategyMode": zod.enum(['zscore', 'ict_hmm']).optional()
 })
 
 export const RunStrategyResponse = zod.object({
@@ -280,9 +283,10 @@ export const RunStrategyResponse = zod.object({
   "positionSide": zod.enum(['flat', 'long', 'short']),
   "unrealizedPnl": zod.number(),
   "signal": zod.enum(['long_entry', 'short_entry', 'exit', 'hold', 'blocked', 'invalidation']),
-  "regime": zod.enum(['mean_reverting', 'trending', 'insufficient_data']),
+  "regime": zod.enum(['mean_reverting', 'trending', 'insufficient_data', 'expansion', 'retracement', 'consolidation']),
   "updatedAt": zod.string(),
-  "tradeBlockedReason": zod.string().nullable()
+  "tradeBlockedReason": zod.string().nullable(),
+  "cluster": zod.string().nullable()
 }))
 })
 
@@ -323,9 +327,10 @@ export const GetMarketSnapshotResponse = zod.object({
   "positionSide": zod.enum(['flat', 'long', 'short']),
   "unrealizedPnl": zod.number(),
   "signal": zod.enum(['long_entry', 'short_entry', 'exit', 'hold', 'blocked', 'invalidation']),
-  "regime": zod.enum(['mean_reverting', 'trending', 'insufficient_data']),
+  "regime": zod.enum(['mean_reverting', 'trending', 'insufficient_data', 'expansion', 'retracement', 'consolidation']),
   "updatedAt": zod.string(),
-  "tradeBlockedReason": zod.string().nullable()
+  "tradeBlockedReason": zod.string().nullable(),
+  "cluster": zod.string().nullable()
 })
 
 
@@ -351,7 +356,8 @@ export const RunBacktestBody = zod.object({
   "minVolumeRatio": zod.number()
 }).optional(),
   "timeframe": zod.enum(['1Min', '5Min', '15Min', '1Hour', '1Day']).optional(),
-  "feed": zod.enum(['iex', 'sip', 'delayed_sip']).optional()
+  "feed": zod.enum(['iex', 'sip', 'delayed_sip']).optional(),
+  "strategyMode": zod.enum(['zscore', 'ict_hmm']).optional()
 })
 
 export const RunBacktestResponse = zod.object({

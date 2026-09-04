@@ -26,6 +26,7 @@ type Bar = {
 
 export type Timeframe = "1Min" | "5Min" | "15Min" | "1Hour" | "1Day";
 export type DataFeed = "iex" | "sip" | "delayed_sip";
+export type StrategyMode = "zscore" | "ict_hmm";
 
 type Position = {
   symbol: string;
@@ -40,9 +41,209 @@ type Position = {
 type Snapshot = ReturnType<typeof GetMarketSnapshotResponse.parse>;
 type Activity = ReturnType<typeof GetAgentDashboardResponse.parse>["activity"][number];
 
+export type AuditRun = Activity & {
+  runId: string;
+  latencyMs: number;
+  modelName: string;
+  outcome: "EXECUTED" | "BLOCKED_BY_RISK" | "NEUTRAL_SIGNAL";
+  marketSnapshot: object;
+  modelOutput: object;
+  riskValidatorResult: object;
+  alpacaResponse: object | null;
+};
+
 const DEFAULT_SYMBOLS = ["SPY", "QQQ", "IWM", "AAPL"];
 const PAPER_TRADING_URL = "https://paper-api.alpaca.markets";
 const MARKET_DATA_URL = "https://data.alpaca.markets/v2";
+
+// ─── IDEMPOTENCY STORE ────────────────────────────────────────────────────────
+const recentIdempotencyKeys = new Map<string, number>(); // key → timestamp ms
+const IDEMPOTENCY_TTL_MS = 60_000;
+
+function checkIdempotency(key: string | undefined): void {
+  if (!key) return;
+  const now = Date.now();
+  // Prune expired keys
+  for (const [k, ts] of recentIdempotencyKeys) {
+    if (now - ts > IDEMPOTENCY_TTL_MS) recentIdempotencyKeys.delete(k);
+  }
+  if (recentIdempotencyKeys.has(key)) {
+    throw new Error(`Duplicate idempotency key: ${key}. This order was already submitted within the last 60 seconds.`);
+  }
+  recentIdempotencyKeys.set(key, now);
+}
+
+// ─── ICT/SMC + HMM ENGINE ────────────────────────────────────────────────────
+
+/** Lightweight 3-state HMM approximation (no hmmlearn dependency).
+ *  Uses log-return statistics over a rolling window to classify regime:
+ *  - Expansion  : high positive mean return
+ *  - Retracement: high negative mean return
+ *  - Consolidation: low absolute mean, low volatility
+ */
+function classifyRegimeHmm(bars: Bar[]): {
+  regime: "Expansion" | "Retracement" | "Consolidation" | "Unclassified";
+  confidence: number;
+  awd: number;
+  directionalBias: 1 | -1;
+} {
+  if (bars.length < 30) return { regime: "Unclassified", confidence: 0, awd: 0, directionalBias: 1 };
+  const closes = bars.map((b) => b.close);
+  const logReturns: number[] = [];
+  for (let i = 1; i < closes.length; i++) {
+    const r = Math.log(closes[i] / closes[i - 1]);
+    if (Number.isFinite(r)) logReturns.push(r);
+  }
+  const recent = logReturns.slice(-20);
+  const full = logReturns.slice(-100);
+  const recentMean = mean(recent);
+  const recentStd = standardDeviation(recent) || 1e-9;
+  const fullStd = standardDeviation(full) || 1e-9;
+  const slopeFactor = Math.min(Math.abs(recentMean) / recentStd, 1);
+  const volRatio = Math.min(recentStd / fullStd, 2) / 2;
+  let regime: "Expansion" | "Retracement" | "Consolidation" | "Unclassified";
+  let confidence: number;
+  if (recentMean > recentStd * 0.3) {
+    regime = "Expansion";
+    confidence = Math.min(recentMean / (recentStd * 0.5), 1);
+  } else if (recentMean < -recentStd * 0.3) {
+    regime = "Retracement";
+    confidence = Math.min(Math.abs(recentMean) / (recentStd * 0.5), 1);
+  } else {
+    regime = "Consolidation";
+    confidence = Math.max(0, 1 - slopeFactor * 2);
+  }
+  const awd = Math.min(0.45 * confidence + 0.35 * slopeFactor + 0.20 * volRatio, 1);
+  const directionalBias: 1 | -1 = recentMean >= 0 ? 1 : -1;
+  return { regime, confidence, awd, directionalBias };
+}
+
+/** Approximate ICT/SMC feature extraction from OHLCV bars.
+ *  Causal: only uses bars up to and including the current bar.
+ */
+function extractSmcFeatures(bars: Bar[]): {
+  fvgDirection: 1 | -1 | 0;
+  bosDirection: 1 | -1 | 0;
+  chochDirection: 1 | -1 | 0;
+  liquiditySweep: boolean;
+  displacement: boolean;
+  displacementRatio: number;
+  premiumDiscount: number;
+  killzone: boolean;
+  sponsorship: boolean;
+  inducement: boolean;
+} {
+  const empty = { fvgDirection: 0 as const, bosDirection: 0 as const, chochDirection: 0 as const, liquiditySweep: false, displacement: false, displacementRatio: 0, premiumDiscount: 0.5, killzone: false, sponsorship: false, inducement: false };
+  if (bars.length < 20) return empty;
+
+  const last = bars.at(-1)!;
+  const prev = bars.at(-2)!;
+  const prev2 = bars.at(-3)!;
+
+  // Fair Value Gap: 3-bar pattern — gap between bar[-3].high and bar[-1].low (bullish) or bar[-3].low and bar[-1].high (bearish)
+  const bullFvg = prev2.high < last.low;
+  const bearFvg = prev2.low > last.high;
+  const fvgDirection: 1 | -1 | 0 = bullFvg ? 1 : bearFvg ? -1 : 0;
+
+  // Swing highs/lows over last 10 bars for BoS/CHoCH
+  const window = bars.slice(-10);
+  const swingHigh = Math.max(...window.map((b) => b.high));
+  const swingLow = Math.min(...window.map((b) => b.low));
+  const prevWindow = bars.slice(-20, -10);
+  const prevSwingHigh = Math.max(...prevWindow.map((b) => b.high));
+  const prevSwingLow = Math.min(...prevWindow.map((b) => b.low));
+
+  // Break of Structure: current close breaks prior swing
+  const bosDirection: 1 | -1 | 0 =
+    last.close > prevSwingHigh ? 1 : last.close < prevSwingLow ? -1 : 0;
+
+  // Change of Character: close breaks structure in opposite direction of prior BoS
+  const priorBos = prev.close > prevSwingHigh ? 1 : prev.close < prevSwingLow ? -1 : 0;
+  const chochDirection: 1 | -1 | 0 =
+    priorBos !== 0 && bosDirection !== 0 && bosDirection !== priorBos ? bosDirection : 0;
+
+  // Liquidity sweep: wick beyond prior swing then close back inside
+  const liquiditySweep =
+    (last.high > prevSwingHigh && last.close < prevSwingHigh) ||
+    (last.low < prevSwingLow && last.close > prevSwingLow);
+
+  // ATR approximation (14-bar)
+  const atrBars = bars.slice(-15);
+  const trValues = atrBars.slice(1).map((b, i) =>
+    Math.max(b.high - b.low, Math.abs(b.high - atrBars[i].close), Math.abs(b.low - atrBars[i].close)),
+  );
+  const atr = mean(trValues) || 1e-9;
+
+  // Displacement: large body candle relative to ATR
+  const body = Math.abs(last.close - (last.close > prev.close ? prev.close : last.close));
+  const candleRange = last.high - last.low || 1e-9;
+  const displacementRatio = (last.high - last.low) / atr;
+  const displacement = displacementRatio >= 1.5 && body / candleRange >= 0.6;
+
+  // Premium / discount: position within 50-bar dealing range
+  const rangeHigh = Math.max(...bars.slice(-50).map((b) => b.high));
+  const rangeLow = Math.min(...bars.slice(-50).map((b) => b.low));
+  const dealingRange = rangeHigh - rangeLow || 1e-9;
+  const premiumDiscount = Math.max(0, Math.min(1, (last.close - rangeLow) / dealingRange));
+
+  // Killzone: approximate London (07–10 UTC) / NY (12–15 UTC) using bar index parity
+  // Without timestamps we use a heuristic: every 8th bar cluster is a session open
+  const killzone = bars.length % 8 < 3;
+
+  const sponsorship = displacement && (last.high - last.low) >= atr;
+  const inducement = fvgDirection !== 0 && (bosDirection !== 0 || chochDirection !== 0);
+
+  return { fvgDirection, bosDirection, chochDirection, liquiditySweep, displacement, displacementRatio, premiumDiscount, killzone, sponsorship, inducement };
+}
+
+/** TMA slope approximation: (close[-1] - close[-2]) / (ATR / 10) */
+function tmaSlopeApprox(bars: Bar[]): number | null {
+  if (bars.length < 15) return null;
+  const closes = bars.map((b) => b.close);
+  const t0 = closes.at(-2)!;
+  const t1 = closes.at(-3)!;
+  const atrBars = bars.slice(-15);
+  const trValues = atrBars.slice(1).map((b, i) =>
+    Math.max(b.high - b.low, Math.abs(b.high - atrBars[i].close), Math.abs(b.low - atrBars[i].close)),
+  );
+  const atr = mean(trValues);
+  if (!atr) return null;
+  return (t0 - t1) / (atr / 10);
+}
+
+type ClusterLabel =
+  | "A - Institutional Reversal"
+  | "B - Trend Expansion"
+  | "C - Value Retracement"
+  | "D - Correlation Basket"
+  | "E - Range Liquidity"
+  | null;
+
+/** 5-cluster router — mirrors PowerX StrategyRouter.route() */
+function routeCluster(
+  regime: "Expansion" | "Retracement" | "Consolidation" | "Unclassified",
+  awd: number,
+  directionalBias: 1 | -1,
+  smc: ReturnType<typeof extractSmcFeatures>,
+  tmaSlope: number | null,
+  minAwd = 0.65,
+  tmaThreshold = 0.2,
+): { cluster: ClusterLabel; direction: 1 | -1 | 0; reason: string } {
+  if (awd < minAwd) return { cluster: null, direction: 0, reason: `AWD ${awd.toFixed(2)} below ${minAwd}` };
+  if (smc.liquiditySweep && smc.chochDirection !== 0)
+    return { cluster: "A - Institutional Reversal", direction: smc.chochDirection, reason: "sweep + CHoCH" };
+  if (smc.bosDirection !== 0 && regime === "Expansion" && smc.displacement)
+    return { cluster: "B - Trend Expansion", direction: smc.bosDirection, reason: "BoS + Expansion + displacement" };
+  if (smc.fvgDirection !== 0 && smc.killzone && smc.inducement)
+    return { cluster: "C - Value Retracement", direction: smc.fvgDirection, reason: "FVG + inducement + killzone" };
+  if (tmaSlope !== null && Math.abs(tmaSlope) >= tmaThreshold && regime === "Consolidation")
+    return { cluster: "D - Correlation Basket", direction: tmaSlope > 0 ? -1 : 1, reason: "TMA extreme + consolidation" };
+  if (smc.killzone && regime === "Consolidation")
+    return { cluster: "E - Range Liquidity", direction: directionalBias, reason: "killzone + consolidation" };
+  return { cluster: null, direction: 0, reason: "no five-cluster confluence" };
+}
+
+// ─── END ICT/SMC + HMM ENGINE ─────────────────────────────────────────────────
 
 export const guardrails = {
   volumeFilter: true,
@@ -65,6 +266,7 @@ let totalScans = 0;
 let signalsToday = 0;
 let blockedToday = 0;
 let activities: Activity[] = [];
+export let auditRuns: AuditRun[] = [];
 const demoPositions = new Map<string, Position>();
 const trailingExtremes = new Map<string, number>();
 const DEFAULT_BACKTEST_DAYS = 180;
@@ -448,6 +650,7 @@ function snapshotFromBars(
   position: Position | undefined,
   extremes = trailingExtremes,
   rules: StrategyRules = guardrails,
+  strategyMode: StrategyMode = "zscore",
 ): Snapshot {
   const closes = bars.map((bar) => bar.close);
   const window = closes.slice(-20);
@@ -499,6 +702,29 @@ function snapshotFromBars(
     }
   }
 
+  // ICT/HMM overlay — compute cluster when mode is ict_hmm
+  let cluster: string | null = null;
+  let hmmRegime: string = bars.length < 22 ? "insufficient_data" : adx <= rules.adxMax ? "mean_reverting" : "trending";
+  if (strategyMode === "ict_hmm" && bars.length >= 30) {
+    const hmm = classifyRegimeHmm(bars);
+    const smc = extractSmcFeatures(bars);
+    const tmaSlope = tmaSlopeApprox(bars);
+    const route = routeCluster(hmm.regime, hmm.awd, hmm.directionalBias, smc, tmaSlope);
+    cluster = route.cluster;
+    // Override signal using cluster direction when AWD gate passes
+    if (!position && route.cluster && route.direction !== 0) {
+      signal = route.direction === 1 ? "long_entry" : "short_entry";
+      tradeBlockedReason = null;
+    } else if (!position && !route.cluster && signal !== "hold") {
+      signal = "blocked";
+      tradeBlockedReason = route.reason;
+    }
+    hmmRegime =
+      hmm.regime === "Expansion" ? "expansion" :
+      hmm.regime === "Retracement" ? "retracement" :
+      hmm.regime === "Consolidation" ? "consolidation" : "insufficient_data";
+  }
+
   return GetMarketSnapshotResponse.parse({
     symbol,
     price,
@@ -513,18 +739,30 @@ function snapshotFromBars(
     positionSide: side,
     unrealizedPnl: position?.unrealizedPnl ?? 0,
     signal,
-    regime: bars.length < 22 ? "insufficient_data" : adx <= rules.adxMax ? "mean_reverting" : "trending",
+    regime: hmmRegime,
+    cluster,
     updatedAt: new Date().toISOString(),
     tradeBlockedReason,
   });
 }
 
-function addActivity(activity: Omit<Activity, "id">): Activity {
+function addActivity(
+  activity: Omit<Activity, "id">,
+  auditExtra?: Omit<AuditRun, keyof Activity>,
+): Activity {
   const created = { id: randomUUID(), ...activity };
   activities = [created, ...activities].slice(0, 40);
   if (created.status === "blocked") blockedToday += 1;
   if (["submitted", "simulated", "closed"].includes(created.status)) signalsToday += 1;
+  if (auditExtra) {
+    const auditRecord: AuditRun = { ...created, ...auditExtra };
+    auditRuns = [auditRecord, ...auditRuns].slice(0, 100);
+  }
   return created;
+}
+
+export function getAuditRuns(): AuditRun[] {
+  return auditRuns;
 }
 
 async function submitEntry(
@@ -532,7 +770,9 @@ async function submitEntry(
   equity: number,
   dryRun: boolean,
   rules: StrategyRules = guardrails,
-): Promise<Activity> {
+  idempotencyKey?: string,
+): Promise<{ side: string; qty: number; orderId: string | null; status: Activity["status"]; reason: string }> {
+  checkIdempotency(idempotencyKey);
   const qty = Math.max(1, Math.floor((equity * (rules.maxPositionPct / 100)) / snapshot.price));
   const side = snapshot.signal === "long_entry" ? "buy" : "sell";
   let orderId: string | null = null;
@@ -546,6 +786,7 @@ async function submitEntry(
         side,
         type: "market",
         time_in_force: "day",
+        client_order_id: idempotencyKey ?? randomUUID(),
       }),
     });
     orderId = order.id;
@@ -561,15 +802,8 @@ async function submitEntry(
       unrealizedPnl: 0,
     });
   }
-  return addActivity({
-    at: new Date().toISOString(),
-    action: side === "buy" ? "LONG ENTRY" : "SHORT ENTRY",
-    symbol: snapshot.symbol,
-    zScore: snapshot.zScore,
-    reason: `Z-score ${snapshot.zScore.toFixed(2)} crossed the ${rules.entryZ.toFixed(1)}σ entry threshold; ADX and volume confirmed.`,
-    orderId,
-    status,
-  });
+  const reason = `Z-score ${snapshot.zScore.toFixed(2)} crossed the ${rules.entryZ.toFixed(1)}σ entry threshold; ADX and volume confirmed.`;
+  return { side, qty, orderId, status, reason };
 }
 
 async function closePosition(
@@ -610,20 +844,24 @@ async function closePosition(
 
 export async function getStatus() {
   const connected = await credentialsWork();
-  return GetAgentStatusResponse.parse({
-    mode: mode(),
-    connected,
-    paper: true,
-    lastRunAt,
-    nextRunAt: automationRunning ? automationNextRunAt : null,
-    running: automationRunning,
-    intervalSeconds: automationIntervalSeconds,
-    startedAt: automationStartedAt,
-    lastError: automationLastError,
-    symbols: DEFAULT_SYMBOLS,
-    heartbeat: new Date().toISOString(),
-    guardrails,
-  });
+  const paperUrlValid = PAPER_TRADING_URL.includes("paper-api.alpaca.markets");
+  return {
+    ...GetAgentStatusResponse.parse({
+      mode: mode(),
+      connected,
+      paper: true,
+      lastRunAt,
+      nextRunAt: automationRunning ? automationNextRunAt : null,
+      running: automationRunning,
+      intervalSeconds: automationIntervalSeconds,
+      startedAt: automationStartedAt,
+      lastError: automationLastError,
+      symbols: automationSymbols,
+      heartbeat: new Date().toISOString(),
+      guardrails,
+    }),
+    paperUrlValid,
+  };
 }
 
 function clearAutomationTimer() {
@@ -634,11 +872,11 @@ function clearAutomationTimer() {
   automationNextRunAt = null;
 }
 
-async function runAutomationCycle(log: Logger) {
+async function runAutomationCycle(log: Logger, strategyMode: StrategyMode = "zscore") {
   if (!automationRunning || automationCycleInFlight) return;
   automationCycleInFlight = true;
   try {
-    await runStrategy(automationSymbols, false, log);
+    await runStrategy(automationSymbols, false, log, guardrails, strategyMode);
     automationLastError = null;
   } catch (error) {
     automationLastError =
@@ -649,15 +887,15 @@ async function runAutomationCycle(log: Logger) {
   }
 }
 
-function scheduleAutomationCycle(log: Logger) {
+function scheduleAutomationCycle(log: Logger, strategyMode: StrategyMode = "zscore") {
   if (!automationRunning) return;
   const delay = automationIntervalSeconds * 1000;
   automationNextRunAt = new Date(Date.now() + delay).toISOString();
   automationTimer = setTimeout(async () => {
     automationTimer = null;
     if (!automationRunning) return;
-    await runAutomationCycle(log);
-    scheduleAutomationCycle(log);
+    await runAutomationCycle(log, strategyMode);
+    scheduleAutomationCycle(log, strategyMode);
   }, delay);
 }
 
@@ -665,6 +903,7 @@ export async function startAgent(
   symbols: string[],
   intervalSeconds: number,
   log: Logger,
+  strategyMode: StrategyMode = "zscore",
 ) {
   const selectedSymbols = normalizedSymbols(symbols);
   if (!selectedSymbols.length) {
@@ -678,8 +917,8 @@ export async function startAgent(
   automationRunning = true;
   automationLastError = null;
 
-  await runAutomationCycle(log);
-  scheduleAutomationCycle(log);
+  await runAutomationCycle(log, strategyMode);
+  scheduleAutomationCycle(log, strategyMode);
 
   return StartAgentResponse.parse({
     running: automationRunning,
@@ -749,18 +988,24 @@ export async function runStrategy(
   dryRun: boolean,
   log: Logger,
   rules: StrategyRules = guardrails,
+  strategyMode: StrategyMode = "zscore",
+  idempotencyKey?: string,
 ) {
+  const runId = randomUUID();
+  const runStart = Date.now();
   const selectedSymbols = normalizedSymbols(symbols);
   const [account, positions] = await Promise.all([fetchAccount(), fetchPositions()]);
   const snapshots = await Promise.all(
     selectedSymbols.map(async (symbol) => {
       const bars = await fetchBars(symbol);
-      return snapshotFromBars(symbol, bars, positionFor(positions, symbol), trailingExtremes, rules);
+      return snapshotFromBars(symbol, bars, positionFor(positions, symbol), trailingExtremes, rules, strategyMode);
     }),
   );
   const actions: Activity[] = [];
   for (const snapshot of snapshots) {
     const position = positionFor(positions, snapshot.symbol);
+    const stepStart = Date.now();
+    const marketSnapshot = { symbol: snapshot.symbol, price: snapshot.price, zScore: snapshot.zScore, adx: snapshot.adx, volumeRatio: snapshot.volumeRatio, regime: snapshot.regime, cluster: snapshot.cluster };
     if (snapshot.signal === "long_entry" || snapshot.signal === "short_entry") {
       if (position) {
         actions.push(
@@ -772,29 +1017,38 @@ export async function runStrategy(
             reason: "An open position already exists; the inventory check prevented stacking risk.",
             orderId: null,
             status: "blocked",
-          }),
+          }, { runId, latencyMs: Date.now() - stepStart, modelName: strategyMode === "ict_hmm" ? "ICT/HMM-5cluster" : "ZScore-ADX", outcome: "BLOCKED_BY_RISK", marketSnapshot, modelOutput: { signal: snapshot.signal, zScore: snapshot.zScore, cluster: snapshot.cluster }, riskValidatorResult: { rule: "duplicate_position", passed: false }, alpacaResponse: null }),
         );
       } else {
-        actions.push(await submitEntry(snapshot, account.equity, dryRun, rules));
+        const entry = await submitEntry(snapshot, account.equity, dryRun, rules, idempotencyKey);
+        actions.push(
+          addActivity({
+            at: new Date().toISOString(),
+            action: entry.side === "buy" ? "LONG ENTRY" : "SHORT ENTRY",
+            symbol: snapshot.symbol,
+            zScore: snapshot.zScore,
+            reason: entry.reason,
+            orderId: entry.orderId,
+            status: entry.status,
+          }, { runId, latencyMs: Date.now() - stepStart, modelName: strategyMode === "ict_hmm" ? "ICT/HMM-5cluster" : "ZScore-ADX", outcome: "EXECUTED", marketSnapshot, modelOutput: { signal: snapshot.signal, zScore: snapshot.zScore, cluster: snapshot.cluster }, riskValidatorResult: { volumeFilter: rules.volumeFilter, adxFilter: rules.adxFilter, passed: true }, alpacaResponse: entry.orderId ? { orderId: entry.orderId } : null }),
+        );
       }
     } else if (snapshot.signal === "exit") {
       if (position) {
-        actions.push(
-          await closePosition(
-            snapshot,
-            `Z-score ${snapshot.zScore.toFixed(2)} crossed back through equilibrium.`,
-            "closed",
-          ),
+        const act = await closePosition(
+          snapshot,
+          `Z-score ${snapshot.zScore.toFixed(2)} crossed back through equilibrium.`,
+          "closed",
         );
+        actions.push(act);
       }
     } else if (snapshot.signal === "invalidation" && position) {
-      actions.push(
-        await closePosition(
-          snapshot,
-          `Risk invalidated at Z-score ${snapshot.zScore.toFixed(2)} or trailing-stop breach.`,
-          "blocked",
-        ),
+      const act = await closePosition(
+        snapshot,
+        `Risk invalidated at Z-score ${snapshot.zScore.toFixed(2)} or trailing-stop breach.`,
+        "blocked",
       );
+      actions.push(act);
     } else if (snapshot.signal === "blocked") {
       actions.push(
         addActivity({
@@ -805,13 +1059,23 @@ export async function runStrategy(
           reason: snapshot.tradeBlockedReason ?? "A strategy guardrail blocked this entry.",
           orderId: null,
           status: "blocked",
-        }),
+        }, { runId, latencyMs: Date.now() - stepStart, modelName: strategyMode === "ict_hmm" ? "ICT/HMM-5cluster" : "ZScore-ADX", outcome: "BLOCKED_BY_RISK", marketSnapshot, modelOutput: { signal: snapshot.signal, zScore: snapshot.zScore, cluster: snapshot.cluster }, riskValidatorResult: { reason: snapshot.tradeBlockedReason }, alpacaResponse: null }),
       );
+    } else {
+      addActivity({
+        at: new Date().toISOString(),
+        action: "HOLD",
+        symbol: snapshot.symbol,
+        zScore: snapshot.zScore,
+        reason: snapshot.tradeBlockedReason ?? "No signal threshold crossed.",
+        orderId: null,
+        status: "simulated",
+      }, { runId, latencyMs: Date.now() - stepStart, modelName: strategyMode === "ict_hmm" ? "ICT/HMM-5cluster" : "ZScore-ADX", outcome: "NEUTRAL_SIGNAL", marketSnapshot, modelOutput: { signal: snapshot.signal, zScore: snapshot.zScore }, riskValidatorResult: {}, alpacaResponse: null });
     }
   }
   lastRunAt = new Date().toISOString();
   totalScans += 1;
-  log.info({ mode: mode(), evaluated: snapshots.length, dryRun }, "Strategy scan completed");
+  log.info({ mode: mode(), evaluated: snapshots.length, dryRun, strategyMode }, "Strategy scan completed");
   return RunStrategyResponse.parse({
     ranAt: lastRunAt,
     mode: mode(),
@@ -887,6 +1151,7 @@ export async function runBacktest(
   historicalOverride?: Array<{ symbol: string; bars: Bar[] }>,
   timeframe: Timeframe = "1Day",
   feed: DataFeed = "iex",
+  strategyMode: StrategyMode = "zscore",
 ) {
   if (!hasCredentials()) {
     throw new Error("Alpaca credentials are required for a historical backtest.");
@@ -980,6 +1245,7 @@ export async function runBacktest(
           : undefined,
         state.extremes,
         rules,
+        strategyMode,
       );
       state.lastPrice = price;
       const barAt = (bars[index].timestamp ?? end).slice(0, 10);
@@ -1090,6 +1356,7 @@ export async function runBacktest(
       barsLoaded,
       trades: trades.length,
       signals,
+      strategyMode,
       returnPct: ((finalEquity - initialCapital) / initialCapital) * 100,
     },
     "Historical backtest completed",
