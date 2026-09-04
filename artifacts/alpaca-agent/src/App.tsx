@@ -18,6 +18,7 @@ import {
   LockKeyhole,
   Menu,
   Play,
+  Square,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -47,6 +48,8 @@ import {
   useOptimizeBacktest,
   useRunBacktest,
   useRunStrategy,
+  useStartAgent,
+  useStopAgent,
 } from '@workspace/api-client-react';
 import type {
   AgentDashboard,
@@ -139,7 +142,7 @@ function AppLogo() {
 function Shell({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const [mobileNav, setMobileNav] = useState(false);
-  const statusQuery = useGetAgentStatus({ query: { queryKey: getGetAgentStatusQueryKey(), refetchInterval: 30000 } });
+  const statusQuery = useGetAgentStatus({ query: { queryKey: getGetAgentStatusQueryKey(), refetchInterval: (query) => query.state.data?.running ? 5000 : 30000 } });
   const healthQuery = useHealthCheck({ query: { queryKey: ['health-check'], refetchInterval: 30000 } });
   const status = statusQuery.data;
   const isDemo = status?.mode === 'demo';
@@ -362,7 +365,7 @@ function AccountStrip({ account }: { account: AgentDashboard['account'] }) {
   );
 }
 
-function AgentStatusCard({ status, onFlatten, flattenPending }: { status: AgentStatus; onFlatten: () => void; flattenPending: boolean }) {
+function AgentStatusCard({ status, onStart, onStop, onFlatten, controlPending, flattenPending }: { status: AgentStatus; onStart: () => void; onStop: () => void; onFlatten: () => void; controlPending: boolean; flattenPending: boolean }) {
   const [confirm, setConfirm] = useState(false);
   const enabledGuardrails = Object.entries(status.guardrails).filter(([key, value]) => typeof value === 'boolean' && value).length;
   return (
@@ -370,7 +373,7 @@ function AgentStatusCard({ status, onFlatten, flattenPending }: { status: AgentS
       <CardHeader
         eyebrow="01 / agent state"
         title="Control surface"
-        action={<div className={cx('status-chip', status.connected ? 'is-good' : 'is-warn')}><span />{status.connected ? 'Connected' : 'Disconnected'}</div>}
+        action={<div className={cx('status-chip', status.running ? 'is-good' : 'is-warn')}><span />{status.running ? 'Running' : 'Stopped'}</div>}
       />
       <div className="status-hero">
         <div className={cx('agent-orbit', status.connected && 'is-live')}>
@@ -379,30 +382,42 @@ function AgentStatusCard({ status, onFlatten, flattenPending }: { status: AgentS
           <div className="orbit-core"><Zap size={22} /></div>
         </div>
         <div>
-          <div className="font-display text-xl font-bold tracking-[-0.04em]">{status.mode === 'demo' ? 'Simulation lane' : 'Paper lane'}</div>
-          <div className="mt-1 text-xs text-muted-foreground">{status.paper ? 'Orders route to paper only.' : 'No brokerage execution active.'}</div>
+          <div className="font-display text-xl font-bold tracking-[-0.04em]">{status.running ? 'Automated paper lane' : status.mode === 'demo' ? 'Simulation lane' : 'Paper lane ready'}</div>
+          <div className="mt-1 text-xs text-muted-foreground">{status.running ? `Scanning ${status.symbols.join(', ')} every ${Math.round(status.intervalSeconds / 60)} min while the market is open.` : status.paper ? 'Start the loop when you are ready to automate paper execution.' : 'No brokerage execution active.'}</div>
         </div>
       </div>
       <div className="status-grid">
         <div><span>Last scan</span><strong>{formatDateTime(status.lastRunAt)}</strong></div>
-        <div><span>Next scan</span><strong>{formatDateTime(status.nextRunAt)}</strong></div>
+        <div><span>Next scan</span><strong>{status.running ? formatDateTime(status.nextRunAt) : '—'}</strong></div>
         <div><span>Heartbeat</span><strong className="font-mono text-[11px]">{status.heartbeat || '—'}</strong></div>
         <div><span>Guardrails</span><strong>{enabledGuardrails} / 6 live</strong></div>
       </div>
+      {status.lastError && <div className="px-5 pt-4 text-xs text-destructive">Last cycle failed: {status.lastError}</div>}
       <div className="status-footer">
         <div className="flex items-center gap-2 text-[11px] text-muted-foreground"><LockKeyhole size={13} /> Paper-only lock engaged</div>
-        {!confirm ? (
-          <button className="button button-danger-ghost" onClick={() => setConfirm(true)} disabled={flattenPending} data-testid="button-open-flatten">
-            <Unplug size={13} /> Flatten
-          </button>
-        ) : (
-          <div className="flex items-center gap-1.5">
-            <button className="button button-danger" onClick={() => { onFlatten(); setConfirm(false); }} disabled={flattenPending} data-testid="button-confirm-flatten">
-              {flattenPending ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />} Confirm
+        <div className="flex items-center gap-2">
+          {status.running ? (
+            <button className="button button-secondary" onClick={onStop} disabled={controlPending} data-testid="button-stop-agent">
+              {controlPending ? <RefreshCw size={13} className="animate-spin" /> : <Square size={12} />} Stop agent
             </button>
-            <button className="icon-button" onClick={() => setConfirm(false)} aria-label="Cancel flatten" data-testid="button-cancel-flatten"><X size={14} /></button>
-          </div>
-        )}
+          ) : (
+            <button className="button button-primary" onClick={onStart} disabled={controlPending || !status.connected} data-testid="button-start-agent">
+              {controlPending ? <RefreshCw size={13} className="animate-spin" /> : <Play size={13} />} Start agent
+            </button>
+          )}
+          {!confirm ? (
+            <button className="button button-danger-ghost" onClick={() => setConfirm(true)} disabled={flattenPending} data-testid="button-open-flatten">
+              <Unplug size={13} /> Flatten
+            </button>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <button className="button button-danger" onClick={() => { onFlatten(); setConfirm(false); }} disabled={flattenPending} data-testid="button-confirm-flatten">
+                {flattenPending ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />} Confirm
+              </button>
+              <button className="icon-button" onClick={() => setConfirm(false)} aria-label="Cancel flatten" data-testid="button-cancel-flatten"><X size={14} /></button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -511,6 +526,8 @@ function DashboardPage() {
   const queryClient = useQueryClient();
   const dashboardQuery = useGetAgentDashboard({ query: { queryKey: getGetAgentDashboardQueryKey(), refetchInterval: 30000 } });
   const runStrategy = useRunStrategy();
+  const start = useStartAgent();
+  const stop = useStopAgent();
   const flatten = useFlattenAgentPositions();
   const [selectedSymbol, setSelectedSymbol] = useState('');
   const [dryRun, setDryRun] = useState(false);
@@ -541,6 +558,31 @@ function DashboardPage() {
       onError: () => setNotice('Flatten request failed. No positions were changed.'),
     });
   };
+  const startContinuousAgent = () => {
+    if (!dashboard?.status.symbols?.length) {
+      setNotice('No symbols are configured for this lane.');
+      return;
+    }
+    setNotice('');
+    start.mutate({ data: { symbols: dashboard.status.symbols, intervalSeconds: 300 } }, {
+      onSuccess: (result) => {
+        setNotice(result.message);
+        queryClient.invalidateQueries({ queryKey: getGetAgentDashboardQueryKey() });
+        queryClient.invalidateQueries({ queryKey: getGetAgentStatusQueryKey() });
+      },
+      onError: () => setNotice('The automated agent could not start. Verify the Alpaca paper connection and try again.'),
+    });
+  };
+  const stopContinuousAgent = () => {
+    stop.mutate(undefined, {
+      onSuccess: (result) => {
+        setNotice(result.message);
+        queryClient.invalidateQueries({ queryKey: getGetAgentDashboardQueryKey() });
+        queryClient.invalidateQueries({ queryKey: getGetAgentStatusQueryKey() });
+      },
+      onError: () => setNotice('The automated agent could not stop. Review the API server and retry.'),
+    });
+  };
   return (
     <>
       <PageIntro
@@ -555,7 +597,7 @@ function DashboardPage() {
           <AccountStrip account={dashboard.account} />
           <MetricRail metrics={dashboard.metrics} />
           <div className="dashboard-grid">
-            <AgentStatusCard status={dashboard.status} onFlatten={flattenPositions} flattenPending={flatten.isPending} />
+            <AgentStatusCard status={dashboard.status} onStart={startContinuousAgent} onStop={stopContinuousAgent} onFlatten={flattenPositions} controlPending={start.isPending || stop.isPending} flattenPending={flatten.isPending} />
             <div className="panel activity-panel">
               <CardHeader eyebrow="03 / event stream" title="Recent decisions" action={<Link href="/activity" className="text-link" data-testid="link-view-all-activity">View audit <ChevronRight size={13} /></Link>} />
               <ActivityList activity={dashboard.activity} compact />
@@ -579,18 +621,21 @@ function StrategyPage() {
   return (
     <>
       <PageIntro eyebrow="Strategy / explainability" title="The logic is the product." description="A mean-reversion playbook with explicit gates. Nothing enters the order lane without passing the trace." action={<Link href="/" className="button button-secondary" data-testid="link-back-control-room"><LayoutDashboard size={14} /> Control room</Link>} />
-      {statusQuery.isLoading ? <LoadingPanel rows={7} /> : statusQuery.isError || !status ? <ErrorPanel onRetry={() => statusQuery.refetch()} /> : <StrategyContent guardrails={status.guardrails} symbols={status.symbols} />}
+      {statusQuery.isLoading ? <LoadingPanel rows={7} /> : statusQuery.isError || !status ? <ErrorPanel onRetry={() => statusQuery.refetch()} /> : <StrategyContent guardrails={status.guardrails} symbols={status.symbols} running={status.running} />}
     </>
   );
 }
 
-function StrategyContent({ guardrails, symbols }: { guardrails: GuardrailState; symbols: string[] }) {
+function StrategyContent({ guardrails, symbols, running }: { guardrails: GuardrailState; symbols: string[]; running: boolean }) {
   const queryClient = useQueryClient();
   const run = useRunStrategy();
+  const start = useStartAgent();
+  const stop = useStopAgent();
   const [selectedSymbols, setSelectedSymbols] = useState(symbols);
   const [entryZ, setEntryZ] = useState(String(guardrails.entryZ));
   const [adxMax, setAdxMax] = useState(String(guardrails.adxMax));
   const [minVolumeRatio, setMinVolumeRatio] = useState(String(guardrails.minVolumeRatio));
+  const [intervalSeconds, setIntervalSeconds] = useState('300');
   const [notice, setNotice] = useState('');
   const submitScan = () => {
     if (!selectedSymbols.length) {
@@ -609,6 +654,33 @@ function StrategyContent({ guardrails, symbols }: { guardrails: GuardrailState; 
         queryClient.invalidateQueries({ queryKey: getGetAgentDashboardQueryKey() });
       },
       onError: () => setNotice('The paper scan could not be completed. Check the Alpaca connection and retry.'),
+    });
+  };
+  const startContinuousAgent = () => {
+    const interval = Number(intervalSeconds);
+    const settings = { entryZ: Number(entryZ), adxMax: Number(adxMax), minVolumeRatio: Number(minVolumeRatio) };
+    if (!selectedSymbols.length || !Number.isInteger(interval) || interval < 60 || interval > 3600 || Object.values(settings).some((value) => !Number.isFinite(value) || value <= 0)) {
+      setNotice('Choose at least one asset, valid thresholds, and a cadence from 60 to 3600 seconds.');
+      return;
+    }
+    setNotice('');
+    start.mutate({ data: { symbols: selectedSymbols, intervalSeconds: interval, settings } }, {
+      onSuccess: (result) => {
+        setNotice(result.message);
+        queryClient.invalidateQueries({ queryKey: getGetAgentDashboardQueryKey() });
+        queryClient.invalidateQueries({ queryKey: getGetAgentStatusQueryKey() });
+      },
+      onError: () => setNotice('The automated agent could not start. Verify the Alpaca paper connection and try again.'),
+    });
+  };
+  const stopContinuousAgent = () => {
+    stop.mutate(undefined, {
+      onSuccess: (result) => {
+        setNotice(result.message);
+        queryClient.invalidateQueries({ queryKey: getGetAgentDashboardQueryKey() });
+        queryClient.invalidateQueries({ queryKey: getGetAgentStatusQueryKey() });
+      },
+      onError: () => setNotice('The automated agent could not stop. Review the API server and retry.'),
     });
   };
   const gates = [
@@ -659,7 +731,15 @@ function StrategyContent({ guardrails, symbols }: { guardrails: GuardrailState; 
               <label><span className="field-label">ADX max</span><input type="number" min="1" step="1" value={adxMax} onChange={(event) => setAdxMax(event.target.value)} data-testid="input-strategy-adx-max" /></label>
               <label><span className="field-label">Volume floor</span><input type="number" min="0.1" step="0.05" value={minVolumeRatio} onChange={(event) => setMinVolumeRatio(event.target.value)} data-testid="input-strategy-volume-ratio" /></label>
             </div>
-            <button className="button button-primary mt-4" onClick={submitScan} disabled={run.isPending} data-testid="button-run-configured-scan">{run.isPending ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />} {run.isPending ? 'Scanning…' : 'Run paper scan'}</button>
+            <div className="mt-4 flex flex-wrap items-end gap-2">
+              <label><span className="field-label">Cadence</span><select value={intervalSeconds} onChange={(event) => setIntervalSeconds(event.target.value)} data-testid="select-agent-cadence"><option value="60">Every 1 minute</option><option value="300">Every 5 minutes</option><option value="900">Every 15 minutes</option><option value="1800">Every 30 minutes</option><option value="3600">Every 60 minutes</option></select></label>
+              <button className="button button-secondary" onClick={submitScan} disabled={run.isPending || start.isPending} data-testid="button-run-configured-scan">{run.isPending ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />} {run.isPending ? 'Scanning…' : 'Run paper scan'}</button>
+              {running ? (
+                <button className="button button-danger-ghost" onClick={stopContinuousAgent} disabled={stop.isPending} data-testid="button-stop-agent-strategy">{stop.isPending ? <RefreshCw size={14} className="animate-spin" /> : <Square size={12} />} Stop automated agent</button>
+              ) : (
+                <button className="button button-primary" onClick={startContinuousAgent} disabled={start.isPending || run.isPending} data-testid="button-start-agent-strategy">{start.isPending ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />} {start.isPending ? 'Starting…' : 'Start automated agent'}</button>
+              )}
+            </div>
           </div>
         </div>
         {notice && <div className="notice-banner m-5 mt-0"><Info size={14} /><span>{notice}</span></div>}

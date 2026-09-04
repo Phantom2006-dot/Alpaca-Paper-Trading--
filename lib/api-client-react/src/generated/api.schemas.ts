@@ -260,6 +260,10 @@ export interface AgentStatus {
   lastRunAt: string | null;
   /** @nullable */
   nextRunAt: string | null;
+  running: boolean;
+  intervalSeconds: number;
+  /** @nullable */
+  lastError: string | null;
   symbols: string[];
   heartbeat: string;
   guardrails: GuardrailState;
@@ -375,6 +379,26 @@ export interface StrategyRunResult {
   evaluated: number;
   actions: StrategyActivity[];
   snapshots: SymbolSnapshot[];
+}
+
+export interface StartAgentInput {
+  /**
+     * @minItems 1
+     * @maxItems 8
+     * @items.minLength 1
+     */
+  symbols?: string[];
+  /**
+     * @minimum 60
+     * @maximum 3600
+     */
+  intervalSeconds?: number;
+  settings?: OptimizationSettings;
+}
+
+export interface AgentControlResult {
+  status: AgentStatus;
+  message: string;
 }
 
 export type FlattenResultMode = typeof FlattenResultMode[keyof typeof FlattenResultMode];
