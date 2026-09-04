@@ -9,6 +9,10 @@ Kairo has two linked entry points:
 
 Users can choose either channel. The web Launch App and Start for free actions open authentication first, then route a successfully authenticated user to `/dashboard`. Telegram is an alternate interface and does not enable live trading.
 
+## Demo material
+
+The screen recording is available from the built frontend at [`/kairo-screen-recording.mp4`](artifacts/alpaca-agent/public/kairo-screen-recording.mp4).
+
 > **Paper trading only.** The execution adapter is hardcoded to `paper-api.alpaca.markets`. No live order routing exists anywhere in this codebase.
 
 ---
