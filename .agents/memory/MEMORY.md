@@ -189,3 +189,12 @@ Minimum threshold: **0.65**
 - **Audit trail**: `GET /api/agent/audit` returns enriched `AuditRun` records with raw JSON payloads.
 - **Idempotency**: `crypto.randomUUID()` per console run, 60s TTL duplicate rejection on server.
 - **Paper URL guard**: `paperUrlValid` field in `getStatus()` response.
+
+
+### Session 7 — Alpaca Credential Connection Fix
+- Confirmed the active repository is `Phantom2006-dot/Alpaca-Paper-Trading--`; the similarly named repository without the trailing `--` is empty.
+- Root cause 1: Vercel rewrote `/api/*` requests to `http://localhost:8080`, which is not reachable in hosted production.
+- Root cause 2: credential verification succeeded against Alpaca, but saving then failed whenever `DATABASE_URL`, `CREDENTIALS_ENCRYPTION_KEY`, or the credentials table was unavailable; this surfaced to the UI as a connection failure.
+- Root cause 3 risk check: per-user credentials are loaded through `withUserCredentials()` in the Express middleware; this path remains intact.
+- Fix: added `api/index.ts`, removed the localhost Vercel rewrite, and changed credential storage to use an in-memory per-process fallback while retaining encrypted PostgreSQL persistence when configured.
+- Validation completed: library project references, API server, frontend, and `git diff --check` all passed. The package manager still reports a local blocked esbuild lifecycle script, but it does not affect these checks.

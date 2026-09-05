@@ -115,3 +115,15 @@ Full merge of PowerX ICT/SMC + HMM 5-cluster engine into the Alpaca-Paper-Tradin
 - Paper trading lock (`paper=true`, `PAPER_TRADING_URL`) must never be removed.
 - No credentials in source — env vars and Supabase AES-GCM only.
 - Codegen must re-run after any `openapi.yaml` change.
+
+## [Session 7] — Alpaca Credential Connection Fix
+
+### Completed
+- Added a process-local credential fallback so valid Alpaca credentials are not rejected when optional database or encryption configuration is unavailable.
+- Kept encrypted PostgreSQL persistence when `DATABASE_URL` and a valid `CREDENTIALS_ENCRYPTION_KEY` are configured; persistence failures no longer mask successful Alpaca verification.
+- Added `api/index.ts` as the hosted Express entrypoint.
+- Removed the Vercel rewrite from `/api/*` to dead `localhost:8080`; `/api/*` now resolves to the serverless function while SPA routes continue to resolve to `index.html`.
+
+### Validation
+- `git diff --check` passed.
+- API library, API server, and frontend TypeScript checks passed; `git diff --check` also passed.
