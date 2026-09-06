@@ -49,20 +49,33 @@ if (!localDemoAuth && !process.env.CLERK_SECRET_KEY) {
     res.status(503).json({ error: "API authentication is not configured. Set CLERK_SECRET_KEY on the API deployment." });
   });
 } else {
-app.use("/api", authMiddleware, async (req, res, next) => {
-  const userId = localDemoAuth ? "local-dev-user" : getAuth(req).userId;
-  if (!userId) {
-    res.status(401).json({ error: "Authentication required." });
-    return;
-  }
-  try {
-    await withUserCredentials(userId, next);
-  } catch (error) {
-    req.log.error({ err: error }, "Unable to load user credentials");
-    res.status(503).json({ error: error instanceof Error ? error.message : "Credential storage is unavailable." });
-  }
-});
+  // Credentials route runs before withUserCredentials — it is the route that sets them.
+  app.use("/api", authMiddleware, async (req, res, next) => {
+    const userId = localDemoAuth ? "local-dev-user" : getAuth(req).userId;
+    if (!userId) {
+      res.status(401).json({ error: "Authentication required." });
+      return;
+    }
+    // Skip withUserCredentials for the credentials route itself.
+    if (req.path === "/agent/credentials") {
+      (req as Request & { resolvedUserId?: string }).resolvedUserId = userId;
+      next();
+      return;
+    }
+    try {
+      await withUserCredentials(userId, next);
+    } catch (error) {
+      req.log.error({ err: error }, "Unable to load user credentials");
+      res.status(503).json({ error: error instanceof Error ? error.message : "Credential storage is unavailable." });
+    }
+  });
 }
 app.use("/api", agentRouter);
+
+// Catch-all error handler — always return JSON, never HTML
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  const message = err instanceof Error ? err.message : "Internal server error";
+  res.status(500).json({ error: message });
+});
 
 export default app;
