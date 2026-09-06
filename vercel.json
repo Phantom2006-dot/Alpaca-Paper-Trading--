@@ -5,7 +5,16 @@
   "framework": "vite",
   "outputDirectory": "artifacts/alpaca-agent/dist/public",
   "ignoreCommand": "git diff --quiet HEAD~ HEAD -- ./",
+  "functions": {
+    "api/**/*.ts": {
+      "maxDuration": 300
+    }
+  },
   "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "/api/:path*"
+    },
     {
       "source": "/:path((?!api(?:/|$)|_next/static|_next/image|favicon.ico).*)",
       "destination": "/index.html"
