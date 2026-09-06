@@ -1,12 +1,12 @@
 {
-  "buildCommand": "node ./build.mjs",
-  "installCommand": "cd ../.. && pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm --filter @workspace/api-server run build",
+  "installCommand": "pnpm install --frozen-lockfile",
   "functions": {
-    "api/index.ts": {
+    "artifacts/api-server/api/index.ts": {
       "maxDuration": 300
     }
   },
   "rewrites": [
-    { "source": "/(.*)", "destination": "/api/index" }
+    { "source": "/(.*)", "destination": "/artifacts/api-server/api/index" }
   ]
 }
