@@ -33,10 +33,14 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.use("/api", healthRouter);
-
 const localDemoAuth = process.env["ALLOW_LOCAL_DEV_AUTH"] === "true";
 const authMiddleware = localDemoAuth ? (_req: Request, _res: Response, next: NextFunction) => next() : clerkMiddleware();
 
+if (!localDemoAuth && !process.env.CLERK_SECRET_KEY) {
+  app.use("/api", (_req, res) => {
+    res.status(503).json({ error: "API authentication is not configured. Set CLERK_SECRET_KEY on the API deployment." });
+  });
+} else {
 app.use("/api", authMiddleware, async (req, res, next) => {
   const userId = localDemoAuth ? "local-dev-user" : getAuth(req).userId;
   if (!userId) {
@@ -50,6 +54,7 @@ app.use("/api", authMiddleware, async (req, res, next) => {
     res.status(503).json({ error: error instanceof Error ? error.message : "Credential storage is unavailable." });
   }
 });
+}
 app.use("/api", agentRouter);
 
 export default app;

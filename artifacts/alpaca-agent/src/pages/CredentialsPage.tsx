@@ -34,7 +34,8 @@ function CredentialsForm({ getToken }: { getToken: () => Promise<string | null> 
         },
         body: JSON.stringify({ apiKey: apiKey.trim(), apiSecret: apiSecret.trim() }),
       });
-      const data = await res.json();
+      const contentType = res.headers.get('content-type') ?? '';
+      const data = contentType.includes('application/json') ? await res.json() : { error: `API returned ${res.status} instead of JSON. Check the deployed API route.` };
       if (!res.ok) throw new Error(data.error ?? 'Failed to save credentials');
       setNotice({ type: 'success', text: data.message });
       setApiKey('');

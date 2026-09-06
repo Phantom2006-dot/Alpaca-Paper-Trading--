@@ -1,3 +1,4 @@
+import { useAuth } from '@clerk/react';
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -54,7 +55,8 @@ export function ConsolePage() {
   const [verdict, setVerdict] = useState<{ verdict: string; reason: string } | null>(null);
   const [inspectorData, setInspectorData] = useState<Record<number, Record<string, unknown>>>({});
   const [activeInspectorStep, setActiveInspectorStep] = useState<number | null>(null);
-  const esRef = useRef<EventSource | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const { getToken } = useAuth();
 
   const activeSymbol = customSymbol.trim().toUpperCase() || symbol;
 
@@ -77,18 +79,38 @@ export function ConsolePage() {
       idempotencyKey,
     });
 
-    const base = (window as any).__API_BASE__ ?? '/api';
-    const es = new EventSource(`${base}/agent/console/stream?${params}`);
-    esRef.current = es;
+    const apiUrl = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, '') ?? '';
+    const controller = new AbortController();
+    abortRef.current = controller;
 
-    es.onmessage = (e) => {
+    void (async () => {
       try {
-        const event: PipelineEvent = JSON.parse(e.data);
+        const token = await getToken();
+        const response = await fetch(`${apiUrl}/api/agent/console/stream?${params}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          signal: controller.signal,
+        });
+        if (!response.ok || !response.body) {
+          throw new Error(`Pipeline request failed with HTTP ${response.status}.`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const messages = buffer.split('\n\n');
+          buffer = messages.pop() ?? '';
+          for (const message of messages) {
+            const dataLine = message.split('\n').find((line) => line.startsWith('data: '));
+            if (!dataLine) continue;
+            const event: PipelineEvent = JSON.parse(dataLine.slice(6));
         if (event.done) {
           setVerdict({ verdict: event.verdict ?? 'REJECTED', reason: event.reason ?? '' });
           setRunning(false);
-          es.close();
-          return;
+          continue;
         }
         if (event.step != null) {
           const idx = event.step - 1;
@@ -107,17 +129,18 @@ export function ConsolePage() {
             setActiveInspectorStep(event.step!);
           }
         }
-      } catch {}
-    };
-
-    es.onerror = () => {
-      setRunning(false);
-      setVerdict({ verdict: 'REJECTED', reason: 'Connection to pipeline stream lost.' });
-      es.close();
-    };
+          }
+        }
+        setRunning(false);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setRunning(false);
+        setVerdict({ verdict: 'REJECTED', reason: error instanceof Error ? error.message : 'Connection to pipeline stream lost.' });
+      }
+    })();
   }
 
-  useEffect(() => () => { esRef.current?.close(); }, []);
+  useEffect(() => () => { abortRef.current?.abort(); }, []);
 
   const currentInspector = activeInspectorStep != null ? inspectorData[activeInspectorStep] : null;
 

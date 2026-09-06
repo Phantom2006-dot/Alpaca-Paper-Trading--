@@ -1190,7 +1190,7 @@ function AuthenticatedLaunchAction({ className, children }: { className: string;
         }
       }}
     >
-      {children} <ArrowRight size={14} />
+      {isSignedIn ? 'Dashboard' : children} <ArrowRight size={14} />
     </button>
   );
 }

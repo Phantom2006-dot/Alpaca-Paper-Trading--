@@ -105,3 +105,4 @@ Before accepting the generated presentation, confirm that:
 - Strategy names and guardrail values match the product facts above.
 - Screenshots contain no secrets.
 - Technical details support the story instead of overwhelming the audience.
+Unexpected token '<', "<!DOCTYPE "... is not valid JSON
