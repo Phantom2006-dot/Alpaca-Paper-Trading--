@@ -1,4 +1,4 @@
-import express, { type Express } from "express";
+import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import { clerkMiddleware, getAuth } from "@clerk/express";
@@ -33,8 +33,12 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.use("/api", healthRouter);
-app.use("/api", clerkMiddleware(), async (req, res, next) => {
-  const { userId } = getAuth(req);
+
+const localDemoAuth = process.env["ALLOW_LOCAL_DEV_AUTH"] === "true";
+const authMiddleware = localDemoAuth ? (_req: Request, _res: Response, next: NextFunction) => next() : clerkMiddleware();
+
+app.use("/api", authMiddleware, async (req, res, next) => {
+  const userId = localDemoAuth ? "local-dev-user" : getAuth(req).userId;
   if (!userId) {
     res.status(401).json({ error: "Authentication required." });
     return;

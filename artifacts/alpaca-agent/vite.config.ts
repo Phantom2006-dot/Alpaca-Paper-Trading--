@@ -20,6 +20,7 @@ export default defineConfig({
     port: 24492,
     strictPort: true,
     host: '0.0.0.0',
+    allowedHosts: ['.manus.computer'],
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8080',

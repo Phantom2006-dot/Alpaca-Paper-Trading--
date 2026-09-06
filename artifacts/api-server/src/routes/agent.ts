@@ -31,6 +31,7 @@ import {
 import { saveCredentials } from "../lib/credentials";
 
 const router: IRouter = Router();
+const localDemoAuth = process.env["ALLOW_LOCAL_DEV_AUTH"] === "true";
 
 router.post("/agent/credentials", async (req, res): Promise<void> => {
   const apiKey = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
@@ -39,7 +40,7 @@ router.post("/agent/credentials", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Both API key and secret are required." });
     return;
   }
-  const { userId } = getAuth(req);
+  const userId = localDemoAuth ? "local-dev-user" : getAuth(req).userId;
   if (!userId) {
     res.status(401).json({ error: "Authentication required." });
     return;
