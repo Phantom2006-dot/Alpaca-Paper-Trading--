@@ -3,13 +3,13 @@ import { useAuth } from '@clerk/react';
 import { Check, Eye, EyeOff, KeyRound, RefreshCw, ShieldCheck, X } from 'lucide-react';
 
 const apiUrl = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, '') ?? '';
+const hasClerk = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(' ');
 }
 
-export function CredentialsPage() {
-  const { getToken } = useAuth();
+function CredentialsForm({ getToken }: { getToken: () => Promise<string | null> }) {
   const [apiKey, setApiKey] = useState('');
   const [apiSecret, setApiSecret] = useState('');
   const [showSecret, setShowSecret] = useState(false);
@@ -25,7 +25,7 @@ export function CredentialsPage() {
     setNotice(null);
     try {
       const token = await getToken();
-      if (!token) throw new Error('You must be signed in to connect Alpaca.');
+      if (hasClerk && !token) throw new Error('You must be signed in to connect Alpaca.');
       const res = await fetch(`${apiUrl}/api/agent/credentials`, {
         method: 'POST',
         headers: {
@@ -175,4 +175,13 @@ export function CredentialsPage() {
       </div>
     </>
   );
+}
+
+function AuthenticatedCredentialsPage() {
+  const { getToken } = useAuth();
+  return <CredentialsForm getToken={getToken} />;
+}
+
+export function CredentialsPage() {
+  return hasClerk ? <AuthenticatedCredentialsPage /> : <CredentialsForm getToken={async () => null} />;
 }
