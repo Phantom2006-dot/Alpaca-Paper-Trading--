@@ -28,7 +28,15 @@ app.use(
     },
   }),
 );
-app.use(cors());
+app.use(cors({
+  origin: [
+    "https://kairo-trade-agent.vercel.app",
+    "https://kairo-nu-two.vercel.app",
+    ...(process.env["CORS_ORIGIN"] ? [process.env["CORS_ORIGIN"]] : []),
+    ...(process.env["NODE_ENV"] !== "production" ? ["http://localhost:24492", "http://127.0.0.1:24492"] : []),
+  ],
+  credentials: true,
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
