@@ -304,15 +304,22 @@ export const FlattenAgentPositionsResponse = zod.object({
 
 
 /**
+ * Submits a market or limit paper order directly to Alpaca without running the strategy engine. Paper-only lock enforced.
  * @summary Place a manual paper order
  */
+export const placeManualTradeBodySymbolMax = 10;
+
+export const placeManualTradeBodyQtyExclusiveMin = 0;
+
+
+
 export const PlaceManualTradeBody = zod.object({
-  "symbol": zod.string().min(1).max(10),
+  "symbol": zod.string().min(1).max(placeManualTradeBodySymbolMax),
   "side": zod.enum(['buy', 'sell']),
-  "qty": zod.number().gt(0),
+  "qty": zod.number().gt(placeManualTradeBodyQtyExclusiveMin),
   "orderType": zod.enum(['market', 'limit']),
-  "limitPrice": zod.number().nullable().optional(),
-  "idempotencyKey": zod.string().nullable().optional()
+  "limitPrice": zod.number().nullish(),
+  "idempotencyKey": zod.string().nullish()
 })
 
 export const PlaceManualTradeResponse = zod.object({
@@ -416,6 +423,26 @@ export const RunBacktestResponse = zod.object({
   "exitReason": zod.string()
 })),
   "ranAt": zod.coerce.date()
+})
+
+
+/**
+ * Sends text or a base64-encoded file to the powerx-agent model and returns the assistant reply.
+ * @summary Query the PowerX AI agent
+ */
+export const queryPowerXBodyTextMax = 8000;
+
+export const queryPowerXBodyPollDefault = false;
+
+export const QueryPowerXBody = zod.object({
+  "text": zod.string().max(queryPowerXBodyTextMax).optional(),
+  "fileBase64": zod.string().optional().describe('Base64-encoded file contents.'),
+  "mimeType": zod.string().optional().describe('MIME type for fileBase64 (e.g. application\/pdf).'),
+  "poll": zod.boolean().default(queryPowerXBodyPollDefault)
+})
+
+export const QueryPowerXResponse = zod.object({
+  "reply": zod.string()
 })
 
 

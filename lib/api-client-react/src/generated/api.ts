@@ -31,8 +31,12 @@ import type {
   FlattenResult,
   GetAgentAssetsParams,
   HealthStatus,
+  ManualTradeInput,
+  ManualTradeResult,
   OptimizationResult,
   OptimizeBacktestInput,
+  PowerXInput,
+  PowerXResult,
   RunStrategyInput,
   StrategyRunResult,
   SymbolSnapshot,
@@ -749,6 +753,78 @@ export const useFlattenAgentPositions = <TError = ErrorType<unknown>,
       return useMutation(getFlattenAgentPositionsMutationOptions(options));
     }
 
+export const getPlaceManualTradeUrl = () => {
+
+
+
+
+  return `/api/agent/trade`
+}
+
+/**
+ * Submits a market or limit paper order directly to Alpaca without running the strategy engine. Paper-only lock enforced.
+ * @summary Place a manual paper order
+ */
+export const placeManualTrade = async (manualTradeInput: ManualTradeInput, options?: Parameters<typeof customFetch>[1]): Promise<ManualTradeResult> => {
+
+  return customFetch<ManualTradeResult>(getPlaceManualTradeUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(manualTradeInput)
+  }
+);}
+
+
+
+
+
+export const getPlaceManualTradeMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof placeManualTrade>>, TError,{data: BodyType<ManualTradeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof placeManualTrade>>, TError,{data: BodyType<ManualTradeInput>}, TContext> => {
+
+const mutationKey = ['placeManualTrade'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof placeManualTrade>>, {data: BodyType<ManualTradeInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  placeManualTrade(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PlaceManualTradeMutationResult = NonNullable<Awaited<ReturnType<typeof placeManualTrade>>>
+    export type PlaceManualTradeMutationBody = BodyType<ManualTradeInput>
+    export type PlaceManualTradeMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Place a manual paper order
+ */
+export const usePlaceManualTrade = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof placeManualTrade>>, TError,{data: BodyType<ManualTradeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof placeManualTrade>>,
+        TError,
+        {data: BodyType<ManualTradeInput>},
+        TContext
+      > => {
+      return useMutation(getPlaceManualTradeMutationOptions(options));
+    }
+
 export const getGetMarketSnapshotUrl = (symbol: string,) => {
 
 
@@ -896,6 +972,78 @@ export const useRunBacktest = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getRunBacktestMutationOptions(options));
+    }
+
+export const getQueryPowerXUrl = () => {
+
+
+
+
+  return `/api/agent/powerx`
+}
+
+/**
+ * Sends text or a base64-encoded file to the powerx-agent model and returns the assistant reply.
+ * @summary Query the PowerX AI agent
+ */
+export const queryPowerX = async (powerXInput: PowerXInput, options?: Parameters<typeof customFetch>[1]): Promise<PowerXResult> => {
+
+  return customFetch<PowerXResult>(getQueryPowerXUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(powerXInput)
+  }
+);}
+
+
+
+
+
+export const getQueryPowerXMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof queryPowerX>>, TError,{data: BodyType<PowerXInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof queryPowerX>>, TError,{data: BodyType<PowerXInput>}, TContext> => {
+
+const mutationKey = ['queryPowerX'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof queryPowerX>>, {data: BodyType<PowerXInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  queryPowerX(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type QueryPowerXMutationResult = NonNullable<Awaited<ReturnType<typeof queryPowerX>>>
+    export type QueryPowerXMutationBody = BodyType<PowerXInput>
+    export type QueryPowerXMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Query the PowerX AI agent
+ */
+export const useQueryPowerX = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof queryPowerX>>, TError,{data: BodyType<PowerXInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof queryPowerX>>,
+        TError,
+        {data: BodyType<PowerXInput>},
+        TContext
+      > => {
+      return useMutation(getQueryPowerXMutationOptions(options));
     }
 
 export const getOptimizeBacktestUrl = () => {

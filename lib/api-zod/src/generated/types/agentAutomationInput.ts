@@ -5,6 +5,7 @@
  * Explainable Alpaca paper-trading agent API
  * OpenAPI spec version: 0.1.0
  */
+import type { AgentAutomationInputStrategyMode } from './agentAutomationInputStrategyMode';
 
 export interface AgentAutomationInput {
   /**
@@ -18,4 +19,5 @@ export interface AgentAutomationInput {
      * @maximum 3600
      */
   intervalSeconds: number;
+  strategyMode?: AgentAutomationInputStrategyMode;
 }

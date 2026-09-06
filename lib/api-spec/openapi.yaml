@@ -259,6 +259,37 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /agent/powerx:
+    post:
+      operationId: queryPowerX
+      tags: [agent]
+      summary: Query the PowerX AI agent
+      description: Sends text or a base64-encoded file to the powerx-agent model and returns the assistant reply.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PowerXInput"
+      responses:
+        "200":
+          description: Assistant reply
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PowerXResult"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: PowerX API unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /agent/optimize:
     post:
       operationId: optimizeBacktest
@@ -914,3 +945,24 @@ components:
         message:
           type: string
       required: [orderId, symbol, side, qty, orderType, status, mode, submittedAt, message]
+    PowerXInput:
+      type: object
+      properties:
+        text:
+          type: string
+          maxLength: 8000
+        fileBase64:
+          type: string
+          description: Base64-encoded file contents.
+        mimeType:
+          type: string
+          description: MIME type for fileBase64 (e.g. application/pdf).
+        poll:
+          type: boolean
+          default: false
+    PowerXResult:
+      type: object
+      properties:
+        reply:
+          type: string
+      required: [reply]

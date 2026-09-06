@@ -27,4 +27,6 @@ export interface SymbolSnapshot {
   updatedAt: string;
   /** @nullable */
   tradeBlockedReason: string | null;
+  /** @nullable */
+  cluster: string | null;
 }

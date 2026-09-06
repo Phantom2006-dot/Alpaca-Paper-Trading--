@@ -33,6 +33,14 @@ export const BacktestInputFeed = {
   delayed_sip: 'delayed_sip',
 } as const;
 
+export type BacktestInputStrategyMode = typeof BacktestInputStrategyMode[keyof typeof BacktestInputStrategyMode];
+
+
+export const BacktestInputStrategyMode = {
+  zscore: 'zscore',
+  ict_hmm: 'ict_hmm',
+} as const;
+
 export interface OptimizationSettings {
   entryZ: number;
   adxMax: number;
@@ -53,6 +61,7 @@ export interface BacktestInput {
   settings?: OptimizationSettings;
   timeframe?: BacktestInputTimeframe;
   feed?: BacktestInputFeed;
+  strategyMode?: BacktestInputStrategyMode;
 }
 
 export type OptimizeBacktestInputTimeframe = typeof OptimizeBacktestInputTimeframe[keyof typeof OptimizeBacktestInputTimeframe];
@@ -271,6 +280,14 @@ export interface AgentStatus {
   guardrails: GuardrailState;
 }
 
+export type AgentAutomationInputStrategyMode = typeof AgentAutomationInputStrategyMode[keyof typeof AgentAutomationInputStrategyMode];
+
+
+export const AgentAutomationInputStrategyMode = {
+  zscore: 'zscore',
+  ict_hmm: 'ict_hmm',
+} as const;
+
 export interface AgentAutomationInput {
   /**
      * @minItems 1
@@ -283,6 +300,7 @@ export interface AgentAutomationInput {
      * @maximum 3600
      */
   intervalSeconds: number;
+  strategyMode?: AgentAutomationInputStrategyMode;
 }
 
 export type AgentAutomationResponseMode = typeof AgentAutomationResponseMode[keyof typeof AgentAutomationResponseMode];
@@ -337,6 +355,9 @@ export const SymbolSnapshotRegime = {
   mean_reverting: 'mean_reverting',
   trending: 'trending',
   insufficient_data: 'insufficient_data',
+  expansion: 'expansion',
+  retracement: 'retracement',
+  consolidation: 'consolidation',
 } as const;
 
 export interface SymbolSnapshot {
@@ -357,6 +378,8 @@ export interface SymbolSnapshot {
   updatedAt: string;
   /** @nullable */
   tradeBlockedReason: string | null;
+  /** @nullable */
+  cluster: string | null;
 }
 
 export type StrategyActivityStatus = typeof StrategyActivityStatus[keyof typeof StrategyActivityStatus];
@@ -398,11 +421,20 @@ export interface AgentDashboard {
   metrics: AgentDashboardMetrics;
 }
 
+export type RunStrategyInputStrategyMode = typeof RunStrategyInputStrategyMode[keyof typeof RunStrategyInputStrategyMode];
+
+
+export const RunStrategyInputStrategyMode = {
+  zscore: 'zscore',
+  ict_hmm: 'ict_hmm',
+} as const;
+
 export interface RunStrategyInput {
   /** @items.minLength 1 */
   symbols: string[];
   dryRun: boolean;
   settings?: OptimizationSettings;
+  strategyMode?: RunStrategyInputStrategyMode;
 }
 
 export type StrategyRunResultMode = typeof StrategyRunResultMode[keyof typeof StrategyRunResultMode];
@@ -434,6 +466,87 @@ export interface FlattenResult {
   mode: FlattenResultMode;
   at: string;
   message: string;
+}
+
+export type ManualTradeInputSide = typeof ManualTradeInputSide[keyof typeof ManualTradeInputSide];
+
+
+export const ManualTradeInputSide = {
+  buy: 'buy',
+  sell: 'sell',
+} as const;
+
+export type ManualTradeInputOrderType = typeof ManualTradeInputOrderType[keyof typeof ManualTradeInputOrderType];
+
+
+export const ManualTradeInputOrderType = {
+  market: 'market',
+  limit: 'limit',
+} as const;
+
+export interface ManualTradeInput {
+  /**
+     * @minLength 1
+     * @maxLength 10
+     */
+  symbol: string;
+  side: ManualTradeInputSide;
+  /** @exclusiveMinimum 0 */
+  qty: number;
+  orderType: ManualTradeInputOrderType;
+  limitPrice?: number | null;
+  idempotencyKey?: string | null;
+}
+
+export type ManualTradeResultSide = typeof ManualTradeResultSide[keyof typeof ManualTradeResultSide];
+
+
+export const ManualTradeResultSide = {
+  buy: 'buy',
+  sell: 'sell',
+} as const;
+
+export type ManualTradeResultStatus = typeof ManualTradeResultStatus[keyof typeof ManualTradeResultStatus];
+
+
+export const ManualTradeResultStatus = {
+  submitted: 'submitted',
+  simulated: 'simulated',
+} as const;
+
+export type ManualTradeResultMode = typeof ManualTradeResultMode[keyof typeof ManualTradeResultMode];
+
+
+export const ManualTradeResultMode = {
+  paper: 'paper',
+  demo: 'demo',
+} as const;
+
+export interface ManualTradeResult {
+  /** @nullable */
+  orderId: string | null;
+  symbol: string;
+  side: ManualTradeResultSide;
+  qty: number;
+  orderType: string;
+  status: ManualTradeResultStatus;
+  mode: ManualTradeResultMode;
+  submittedAt: string;
+  message: string;
+}
+
+export interface PowerXInput {
+  /** @maxLength 8000 */
+  text?: string;
+  /** Base64-encoded file contents. */
+  fileBase64?: string;
+  /** MIME type for fileBase64 (e.g. application/pdf). */
+  mimeType?: string;
+  poll?: boolean;
+}
+
+export interface PowerXResult {
+  reply: string;
 }
 
 export type GetAgentAssetsParams = {

@@ -13,4 +13,7 @@ export const SymbolSnapshotRegime = {
   mean_reverting: 'mean_reverting',
   trending: 'trending',
   insufficient_data: 'insufficient_data',
+  expansion: 'expansion',
+  retracement: 'retracement',
+  consolidation: 'consolidation',
 } as const;

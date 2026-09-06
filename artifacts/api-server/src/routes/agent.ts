@@ -29,6 +29,7 @@ import {
   validateAlpacaCredentials,
 } from "../lib/strategy";
 import { saveCredentials } from "../lib/credentials";
+import { queryPowerX } from "../lib/powerx";
 
 const router: IRouter = Router();
 const localDemoAuth = process.env["ALLOW_LOCAL_DEV_AUTH"] === "true";
@@ -389,6 +390,35 @@ router.get("/agent/market/:symbol", async (req, res): Promise<void> => {
   } catch (error) {
     req.log.error({ err: error }, "Market snapshot failed");
     res.status(502).json({ error: error instanceof Error ? error.message : "Market snapshot failed" });
+  }
+});
+
+router.post("/agent/powerx", async (req, res): Promise<void> => {
+  const text = typeof req.body?.text === "string" ? req.body.text.trim() : undefined;
+  const mimeType = typeof req.body?.mimeType === "string" ? req.body.mimeType.trim() : undefined;
+  const poll = req.body?.poll === true;
+
+  let fileBytes: Buffer | undefined;
+  if (typeof req.body?.fileBase64 === "string" && mimeType) {
+    try {
+      fileBytes = Buffer.from(req.body.fileBase64, "base64");
+    } catch {
+      res.status(400).json({ error: "fileBase64 is not valid base64." });
+      return;
+    }
+  }
+
+  if (!text && !fileBytes) {
+    res.status(400).json({ error: "Provide text or fileBase64 + mimeType." });
+    return;
+  }
+
+  try {
+    const reply = await queryPowerX({ text, fileBytes, mimeType, poll });
+    res.json({ reply });
+  } catch (error) {
+    req.log.error({ err: error }, "PowerX query failed");
+    res.status(502).json({ error: error instanceof Error ? error.message : "PowerX query failed" });
   }
 });
 

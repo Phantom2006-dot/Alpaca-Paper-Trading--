@@ -6,10 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { OptimizationSettings } from './optimizationSettings';
+import type { RunStrategyInputStrategyMode } from './runStrategyInputStrategyMode';
 
 export interface RunStrategyInput {
   /** @items.minLength 1 */
   symbols: string[];
   dryRun: boolean;
   settings?: OptimizationSettings;
+  strategyMode?: RunStrategyInputStrategyMode;
 }
