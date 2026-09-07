@@ -215,6 +215,14 @@ router.get("/agent/console/stream", async (req, res): Promise<void> => {
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
+  // Explicit CORS headers for SSE — Vercel edge may not propagate the cors() middleware headers
+  // for streaming responses, so we set them directly here.
+  const origin = req.headers["origin"];
+  const allowed = ["https://kairo-trade-agent.vercel.app", "https://kairo-nu-two.vercel.app", "http://localhost:24492", "http://127.0.0.1:24492"];
+  if (origin && allowed.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
+  res.setHeader("Access-Control-Allow-Credentials", "true");
   res.flushHeaders();
 
   const emit = (event: object) => {

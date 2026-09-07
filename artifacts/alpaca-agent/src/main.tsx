@@ -27,10 +27,8 @@ function AuthenticatedApp() {
   return <App />;
 }
 
-if (!publishableKey) {
-  setBaseUrl(apiUrl ?? null);
-  setAuthTokenGetter(null);
-}
+// Set base URL synchronously before any render so no query fires against the wrong origin.
+setBaseUrl(apiUrl ?? null);
 
 createRoot(document.getElementById('root')!, {
   onCaughtError: (error, errorInfo) => {

@@ -57,7 +57,7 @@ if (!localDemoAuth && !process.env.CLERK_SECRET_KEY) {
       return;
     }
     // Skip withUserCredentials for routes that work without credentials.
-    const PUBLIC_PATHS = ["/agent/credentials", "/agent/status"];
+    const PUBLIC_PATHS = ["/agent/credentials", "/agent/status", "/agent/console/stream"];
     if (PUBLIC_PATHS.some((p) => req.path === p || req.path.startsWith(p + "/"))) {
       (req as Request & { resolvedUserId?: string }).resolvedUserId = userId;
       next();
