@@ -45,7 +45,23 @@ type Snapshot = ReturnType<typeof GetMarketSnapshotResponse.parse>;
 type Activity = ReturnType<typeof GetAgentDashboardResponse.parse>["activity"][number];
 
 type AlpacaCredentials = { apiKey: string; apiSecret: string };
-const requestCredentials = new AsyncLocalStorage<AlpacaCredentials>();
+
+/**
+ * Per-request async context. Carries both the authenticated user id and the
+ * Alpaca credentials resolved for that user so every downstream engine call
+ * (and the automation loop it starts) is bound to exactly one user.
+ */
+type AgentSession = {
+  userId: string;
+  credentials: AlpacaCredentials;
+};
+const requestCredentials = new AsyncLocalStorage<AgentSession>();
+
+const DEMO_USER_ID = "local-dev-user";
+
+function currentUserId(): string {
+  return requestCredentials.getStore()?.userId ?? DEMO_USER_ID;
+}
 
 export async function validateAlpacaCredentials(credentials: AlpacaCredentials): Promise<void> {
   const response = await fetch(`${PAPER_TRADING_URL}/v2/account`, {
@@ -62,11 +78,14 @@ export async function validateAlpacaCredentials(credentials: AlpacaCredentials):
 
 export async function withUserCredentials<T>(userId: string, callback: () => T | Promise<T>): Promise<T> {
   const credentials = await loadCredentials(userId);
-  return requestCredentials.run(credentials ?? { apiKey: "", apiSecret: "" }, callback);
+  return requestCredentials.run(
+    { userId, credentials: credentials ?? { apiKey: "", apiSecret: "" } },
+    callback,
+  );
 }
 
 function getAlpacaCredentials(): AlpacaCredentials {
-  const scoped = requestCredentials.getStore();
+  const scoped = requestCredentials.getStore()?.credentials;
   return scoped ?? {
     apiKey: process.env["ALPACA_API_KEY"] ?? "",
     apiSecret: process.env["ALPACA_API_SECRET"] ?? "",
@@ -293,24 +312,91 @@ export const guardrails = {
 };
 type StrategyRules = typeof guardrails;
 
-let lastRunAt: string | null = null;
-let totalScans = 0;
-let signalsToday = 0;
-let blockedToday = 0;
-let activities: Activity[] = [];
-export let auditRuns: AuditRun[] = [];
-const demoPositions = new Map<string, Position>();
-const trailingExtremes = new Map<string, number>();
 const DEFAULT_BACKTEST_DAYS = 180;
 const DEFAULT_AUTOMATION_INTERVAL_SECONDS = 300;
-let automationTimer: ReturnType<typeof setTimeout> | null = null;
-let automationRunning = false;
-let automationIntervalSeconds = DEFAULT_AUTOMATION_INTERVAL_SECONDS;
-let automationSymbols = [...DEFAULT_SYMBOLS];
-let automationStartedAt: string | null = null;
-let automationNextRunAt: string | null = null;
-let automationLastError: string | null = null;
-let automationCycleInFlight = false;
+
+// ─── PER-USER AGENT RUNTIME ──────────────────────────────────────────────────
+// All mutable agent state (activity trail, audit runs, demo positions,
+// trailing extremes, automation loop) is scoped per signed-in user instead of
+// being module-level singletons, so users sharing one process cannot read or
+// clobber each other's agent. The active user comes from the AsyncLocalStorage
+// session set by withUserCredentials(); contexts without a session (local demo
+// auth, tests) fall back to a shared demo runtime.
+//
+// Note: on Vercel serverless, in-process runtimes and timers do not survive
+// across instances — durable cross-instance state belongs in PostgreSQL. This
+// isolation targets long-running processes (self-host / Replit) and makes
+// single-instance behavior correct for many users.
+
+type AgentRuntimeState = {
+  userId: string;
+  lastRunAt: string | null;
+  totalScans: number;
+  signalsToday: number;
+  blockedToday: number;
+  activities: Activity[];
+  auditRuns: AuditRun[];
+  demoPositions: Map<string, Position>;
+  trailingExtremes: Map<string, number>;
+  automationTimer: ReturnType<typeof setTimeout> | null;
+  automationRunning: boolean;
+  automationIntervalSeconds: number;
+  automationSymbols: string[];
+  automationStartedAt: string | null;
+  automationNextRunAt: string | null;
+  automationLastError: string | null;
+  automationCycleInFlight: boolean;
+};
+
+function createAgentRuntime(userId: string): AgentRuntimeState {
+  return {
+    userId,
+    lastRunAt: null,
+    totalScans: 0,
+    signalsToday: 0,
+    blockedToday: 0,
+    activities: [],
+    auditRuns: [],
+    demoPositions: new Map(),
+    trailingExtremes: new Map(),
+    automationTimer: null,
+    automationRunning: false,
+    automationIntervalSeconds: DEFAULT_AUTOMATION_INTERVAL_SECONDS,
+    automationSymbols: [...DEFAULT_SYMBOLS],
+    automationStartedAt: null,
+    automationNextRunAt: null,
+    automationLastError: null,
+    automationCycleInFlight: false,
+  };
+}
+
+const agentRuntimes = new Map<string, AgentRuntimeState>();
+
+/** Returns the mutable runtime bound to the current session user. */
+function agentState(): AgentRuntimeState {
+  const userId = currentUserId();
+  let runtime = agentRuntimes.get(userId);
+  if (!runtime) {
+    runtime = createAgentRuntime(userId);
+    agentRuntimes.set(userId, runtime);
+  }
+  return runtime;
+}
+
+/** Returns (creating if needed) the runtime for an explicit user id. */
+function agentStateFor(userId: string): AgentRuntimeState {
+  let runtime = agentRuntimes.get(userId);
+  if (!runtime) {
+    runtime = createAgentRuntime(userId);
+    agentRuntimes.set(userId, runtime);
+  }
+  return runtime;
+}
+
+/** Test helper: clears per-user runtimes so each test starts fresh. */
+export function _resetAgentRuntimesForTests(): void {
+  agentRuntimes.clear();
+}
 
 function hasCredentials(): boolean {
   const credentials = getAlpacaCredentials();
@@ -564,7 +650,7 @@ async function fetchAccount(): Promise<{
 }
 
 async function fetchPositions(): Promise<Position[]> {
-  if (!hasCredentials()) return [...demoPositions.values()];
+  if (!hasCredentials()) return [...agentState().demoPositions.values()];
   const positions = await alpacaRequest<
     Array<{
       symbol: string;
@@ -679,7 +765,7 @@ function snapshotFromBars(
   symbol: string,
   bars: Bar[],
   position: Position | undefined,
-  extremes = trailingExtremes,
+  extremes = agentState().trailingExtremes,
   rules: StrategyRules = guardrails,
   strategyMode: StrategyMode = "zscore",
 ): Snapshot {
@@ -781,19 +867,20 @@ function addActivity(
   activity: Omit<Activity, "id">,
   auditExtra?: Omit<AuditRun, keyof Activity>,
 ): Activity {
+  const state = agentState();
   const created = { id: randomUUID(), ...activity };
-  activities = [created, ...activities].slice(0, 40);
-  if (created.status === "blocked") blockedToday += 1;
-  if (["submitted", "simulated", "closed"].includes(created.status)) signalsToday += 1;
+  state.activities = [created, ...state.activities].slice(0, 40);
+  if (created.status === "blocked") state.blockedToday += 1;
+  if (["submitted", "simulated", "closed"].includes(created.status)) state.signalsToday += 1;
   if (auditExtra) {
     const auditRecord: AuditRun = { ...created, ...auditExtra };
-    auditRuns = [auditRecord, ...auditRuns].slice(0, 100);
+    state.auditRuns = [auditRecord, ...state.auditRuns].slice(0, 100);
   }
   return created;
 }
 
 export function getAuditRuns(): AuditRun[] {
-  return auditRuns;
+  return agentState().auditRuns;
 }
 
 async function submitEntry(
@@ -823,7 +910,7 @@ async function submitEntry(
     orderId = order.id;
     status = "submitted";
   } else if (!hasCredentials()) {
-    demoPositions.set(snapshot.symbol, {
+    agentState().demoPositions.set(snapshot.symbol, {
       symbol: snapshot.symbol,
       qty,
       side: side === "buy" ? "long" : "short",
@@ -859,9 +946,9 @@ async function closePosition(
       throw new Error(`Alpaca close ${response.status}: ${message.slice(0, 300)}`);
     }
   } else {
-    demoPositions.delete(snapshot.symbol);
+    agentState().demoPositions.delete(snapshot.symbol);
   }
-  trailingExtremes.delete(snapshot.symbol);
+  agentState().trailingExtremes.delete(snapshot.symbol);
   return addActivity({
     at: new Date().toISOString(),
     action: status === "closed" ? "EXIT TO EQUILIBRIUM" : "HARD INVALIDATION",
@@ -874,6 +961,7 @@ async function closePosition(
 }
 
 export async function getStatus() {
+  const state = agentState();
   const connected = await credentialsWork();
   const paperUrlValid = PAPER_TRADING_URL.includes("paper-api.alpaca.markets");
   return {
@@ -881,13 +969,13 @@ export async function getStatus() {
       mode: mode(),
       connected,
       paper: true,
-      lastRunAt,
-      nextRunAt: automationRunning ? automationNextRunAt : null,
-      running: automationRunning,
-      intervalSeconds: automationIntervalSeconds,
-      startedAt: automationStartedAt,
-      lastError: automationLastError,
-      symbols: automationSymbols,
+      lastRunAt: state.lastRunAt,
+      nextRunAt: state.automationRunning ? state.automationNextRunAt : null,
+      running: state.automationRunning,
+      intervalSeconds: state.automationIntervalSeconds,
+      startedAt: state.automationStartedAt,
+      lastError: state.automationLastError,
+      symbols: state.automationSymbols,
       heartbeat: new Date().toISOString(),
       guardrails,
     }),
@@ -895,38 +983,42 @@ export async function getStatus() {
   };
 }
 
-function clearAutomationTimer() {
-  if (automationTimer) {
-    clearTimeout(automationTimer);
-    automationTimer = null;
+function clearAutomationTimer(state: AgentRuntimeState) {
+  if (state.automationTimer) {
+    clearTimeout(state.automationTimer);
+    state.automationTimer = null;
   }
-  automationNextRunAt = null;
+  state.automationNextRunAt = null;
 }
 
-async function runAutomationCycle(log: Logger, strategyMode: StrategyMode = "zscore") {
-  if (!automationRunning || automationCycleInFlight) return;
-  automationCycleInFlight = true;
+async function runAutomationCycle(state: AgentRuntimeState, log: Logger, strategyMode: StrategyMode = "zscore") {
+  if (!state.automationRunning || state.automationCycleInFlight) return;
+  state.automationCycleInFlight = true;
   try {
-    await runStrategy(automationSymbols, false, log, guardrails, strategyMode);
-    automationLastError = null;
+    // The timer callback runs outside any request, so re-enter this user's
+    // session context (freshly reloaded credentials) before each cycle.
+    await withUserCredentials(state.userId, () =>
+      runStrategy(state.automationSymbols, false, log, guardrails, strategyMode),
+    );
+    state.automationLastError = null;
   } catch (error) {
-    automationLastError =
+    state.automationLastError =
       error instanceof Error ? error.message : "Strategy cycle failed";
     log.error({ err: error }, "Continuous strategy cycle failed");
   } finally {
-    automationCycleInFlight = false;
+    state.automationCycleInFlight = false;
   }
 }
 
-function scheduleAutomationCycle(log: Logger, strategyMode: StrategyMode = "zscore") {
-  if (!automationRunning) return;
-  const delay = automationIntervalSeconds * 1000;
-  automationNextRunAt = new Date(Date.now() + delay).toISOString();
-  automationTimer = setTimeout(async () => {
-    automationTimer = null;
-    if (!automationRunning) return;
-    await runAutomationCycle(log, strategyMode);
-    scheduleAutomationCycle(log, strategyMode);
+function scheduleAutomationCycle(state: AgentRuntimeState, log: Logger, strategyMode: StrategyMode = "zscore") {
+  if (!state.automationRunning) return;
+  const delay = state.automationIntervalSeconds * 1000;
+  state.automationNextRunAt = new Date(Date.now() + delay).toISOString();
+  state.automationTimer = setTimeout(async () => {
+    state.automationTimer = null;
+    if (!state.automationRunning) return;
+    await runAutomationCycle(state, log, strategyMode);
+    scheduleAutomationCycle(state, log, strategyMode);
   }, delay);
 }
 
@@ -936,53 +1028,55 @@ export async function startAgent(
   log: Logger,
   strategyMode: StrategyMode = "zscore",
 ) {
+  const state = agentState();
   const selectedSymbols = normalizedSymbols(symbols);
   if (!selectedSymbols.length) {
     throw new Error("At least one symbol is required to start the agent.");
   }
 
-  clearAutomationTimer();
-  automationSymbols = selectedSymbols;
-  automationIntervalSeconds = intervalSeconds;
-  automationStartedAt = new Date().toISOString();
-  automationRunning = true;
-  automationLastError = null;
+  clearAutomationTimer(state);
+  state.automationSymbols = selectedSymbols;
+  state.automationIntervalSeconds = intervalSeconds;
+  state.automationStartedAt = new Date().toISOString();
+  state.automationRunning = true;
+  state.automationLastError = null;
 
-  await runAutomationCycle(log, strategyMode);
-  scheduleAutomationCycle(log, strategyMode);
+  await runAutomationCycle(state, log, strategyMode);
+  scheduleAutomationCycle(state, log, strategyMode);
 
   return StartAgentResponse.parse({
-    running: automationRunning,
+    running: state.automationRunning,
     mode: mode(),
-    symbols: automationSymbols,
-    intervalSeconds: automationIntervalSeconds,
-    startedAt: automationStartedAt,
-    lastRunAt,
-    nextRunAt: automationNextRunAt,
-    lastError: automationLastError,
+    symbols: state.automationSymbols,
+    intervalSeconds: state.automationIntervalSeconds,
+    startedAt: state.automationStartedAt,
+    lastRunAt: state.lastRunAt,
+    nextRunAt: state.automationNextRunAt,
+    lastError: state.automationLastError,
     message:
       mode() === "paper"
-        ? `Agent started. Paper strategy cycles run every ${automationIntervalSeconds} seconds.`
+        ? `Agent started. Paper strategy cycles run every ${state.automationIntervalSeconds} seconds.`
         : "Agent started in demo mode. Add Alpaca paper credentials before relying on paper execution.",
   });
 }
 
 export function stopAgent(log: Logger) {
-  const wasRunning = automationRunning;
-  automationRunning = false;
-  clearAutomationTimer();
-  automationStartedAt = null;
+  const state = agentState();
+  const wasRunning = state.automationRunning;
+  state.automationRunning = false;
+  clearAutomationTimer(state);
+  state.automationStartedAt = null;
   log.info({ wasRunning }, "Continuous strategy agent stopped");
 
   return StopAgentResponse.parse({
     running: false,
     mode: mode(),
-    symbols: automationSymbols,
-    intervalSeconds: automationIntervalSeconds,
+    symbols: state.automationSymbols,
+    intervalSeconds: state.automationIntervalSeconds,
     startedAt: null,
-    lastRunAt,
+    lastRunAt: state.lastRunAt,
     nextRunAt: null,
-    lastError: automationLastError,
+    lastError: state.automationLastError,
     message: wasRunning
       ? "Agent stopped. Existing paper positions were not changed."
       : "Agent is already stopped. Existing paper positions were not changed.",
@@ -990,6 +1084,7 @@ export function stopAgent(log: Logger) {
 }
 
 export async function getDashboard(log: Logger) {
+  const state = agentState();
   const [account, positions] = await Promise.all([fetchAccount(), fetchPositions()]);
   const snapshots = await Promise.all(
     DEFAULT_SYMBOLS.map(async (symbol) => {
@@ -1002,11 +1097,11 @@ export async function getDashboard(log: Logger) {
     status,
     account,
     snapshots,
-    activity: activities,
+    activity: state.activities,
     metrics: {
-      totalScans: totalScans,
-      signalsToday,
-      blockedToday,
+      totalScans: state.totalScans,
+      signalsToday: state.signalsToday,
+      blockedToday: state.blockedToday,
       openPositions: positions.length,
       winRate: 68.4,
       avgHoldHours: 6.2,
@@ -1029,7 +1124,14 @@ export async function runStrategy(
   const snapshots = await Promise.all(
     selectedSymbols.map(async (symbol) => {
       const bars = await fetchBars(symbol);
-      return snapshotFromBars(symbol, bars, positionFor(positions, symbol), trailingExtremes, rules, strategyMode);
+      return snapshotFromBars(
+        symbol,
+        bars,
+        positionFor(positions, symbol),
+        agentState().trailingExtremes,
+        rules,
+        strategyMode,
+      );
     }),
   );
   const actions: Activity[] = [];
@@ -1104,11 +1206,12 @@ export async function runStrategy(
       }, { runId, latencyMs: Date.now() - stepStart, modelName: strategyMode === "ict_hmm" ? "ICT/HMM-5cluster" : "ZScore-ADX", outcome: "NEUTRAL_SIGNAL", marketSnapshot, modelOutput: { signal: snapshot.signal, zScore: snapshot.zScore }, riskValidatorResult: {}, alpacaResponse: null });
     }
   }
-  lastRunAt = new Date().toISOString();
-  totalScans += 1;
+  const state = agentState();
+  state.lastRunAt = new Date().toISOString();
+  state.totalScans += 1;
   log.info({ mode: mode(), evaluated: snapshots.length, dryRun, strategyMode }, "Strategy scan completed");
   return RunStrategyResponse.parse({
-    ranAt: lastRunAt,
+    ranAt: state.lastRunAt,
     mode: mode(),
     evaluated: snapshots.length,
     actions,
@@ -1151,7 +1254,7 @@ export async function placeManualTrade(
     const bars = demoBars(sym);
     const price = bars.at(-1)?.close ?? 100;
     if (side === "buy") {
-      demoPositions.set(sym, {
+      agentState().demoPositions.set(sym, {
         symbol: sym,
         qty,
         side: "long",
@@ -1161,7 +1264,7 @@ export async function placeManualTrade(
         unrealizedPnl: 0,
       });
     } else {
-      demoPositions.delete(sym);
+      agentState().demoPositions.delete(sym);
     }
   }
   const submittedAt = new Date().toISOString();
@@ -1208,10 +1311,10 @@ export async function flattenPositions(log: Logger) {
       closed = positions.length;
     }
   } else {
-    closed = demoPositions.size;
-    demoPositions.clear();
+    closed = agentState().demoPositions.size;
+    agentState().demoPositions.clear();
   }
-  trailingExtremes.clear();
+  agentState().trailingExtremes.clear();
   log.warn({ closed, mode: mode() }, "Paper positions flattened");
   return FlattenAgentPositionsResponse.parse({
     closed,

@@ -91,7 +91,15 @@ export function ConsolePage() {
           signal: controller.signal,
         });
         if (!response.ok || !response.body) {
-          throw new Error(`Pipeline request failed with HTTP ${response.status}.`);
+          let detail = '';
+          try {
+            const raw = await response.text();
+            const data = JSON.parse(raw) as { error?: unknown };
+            if (typeof data?.error === 'string') detail = ` — ${data.error}`;
+          } catch {
+            // Non-JSON error body — fall back to the status code only.
+          }
+          throw new Error(`Pipeline request failed with HTTP ${response.status}${detail}.`);
         }
 
         const reader = response.body.getReader();
@@ -135,7 +143,13 @@ export function ConsolePage() {
       } catch (error) {
         if (controller.signal.aborted) return;
         setRunning(false);
-        setVerdict({ verdict: 'REJECTED', reason: error instanceof Error ? error.message : 'Connection to pipeline stream lost.' });
+        const reason =
+          error instanceof TypeError
+            ? `Cannot reach the agent API${apiUrl ? ` at ${apiUrl}` : ''} (failed to fetch). Check that the API is deployed and reachable, that VITE_API_URL points to it (or is unset for same-origin /api), and that this site's origin is in the API's CORS allowlist (CORS_ORIGINS).`
+            : error instanceof Error
+              ? error.message
+              : 'Connection to pipeline stream lost.';
+        setVerdict({ verdict: 'REJECTED', reason });
       }
     })();
   }

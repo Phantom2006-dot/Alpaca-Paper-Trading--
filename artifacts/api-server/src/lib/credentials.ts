@@ -1,9 +1,33 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import pg from "pg";
+import { logger } from "./logger";
+import { canEncrypt, decrypt, encrypt } from "./crypto";
 
 const { Pool } = pg;
-const pool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL }) : null;
-const TABLE_NAME = "alpaca_credentials";
+
+/**
+ * Per-user Alpaca paper credentials, encrypted at rest.
+ *
+ * Storage model (in priority order):
+ *  1. PostgreSQL (DATABASE_URL + CREDENTIALS_ENCRYPTION_KEY) — durable and
+ *     shared across serverless instances. This is what makes "save once,
+ *     auto-load on every login" work on Vercel.
+ *  2. Process-local memory map — a convenience fallback for long-running
+ *     single-process development and for short TTL caching of DB reads.
+ *     Never treat this as durable: it is lost on restart and does not exist
+ *     on other serverless instances.
+ *
+ * The table is created lazily and idempotently so a fresh database "just
+ * works" — deployments no longer silently degrade to memory-only storage just
+ * because `drizzle-kit push` was never run.
+ *
+ * Lifecycle states exposed to callers:
+ *  - "none"        — no stored credentials anywhere (fresh user → demo mode).
+ *  - "memory"      — active in this process only (no DATABASE_URL configured).
+ *  - "database"    — encrypted row exists and decrypts cleanly.
+ *  - "unreadable"  — a row exists but cannot be decrypted (e.g. the encryption
+ *                    key was rotated). Must NOT be reported as demo mode: the
+ *                    UI should prompt the user to re-enter their keys.
+ */
 
 type Credentials = { apiKey: string; apiSecret: string };
 
@@ -12,48 +36,133 @@ type StoredCredentials = {
   encryptedApiSecret: string;
 };
 
-// The memory store keeps the current deployment usable when optional database
-// persistence has not been configured yet. It is intentionally process-local
-// and is never written to logs or returned to the client.
-const memoryCredentials = new Map<string, Credentials>();
+export type SaveCredentialsResult = {
+  /** True when the encrypted copy reached PostgreSQL. */
+  persistedToDatabase: boolean;
+  /** True when the keys are usable by the current process right now. */
+  activeInMemory: boolean;
+};
 
-function canEncrypt(): boolean {
-  const raw = process.env.CREDENTIALS_ENCRYPTION_KEY;
-  if (!raw) return false;
-  const key = Buffer.from(raw, /^[0-9a-f]{64}$/i.test(raw) ? "hex" : "base64");
-  return key.length === 32;
+export type CredentialStatus =
+  | { state: "none"; storage: null }
+  | { state: "memory"; storage: "memory" }
+  | {
+      state: "database";
+      storage: "database";
+      keyLast4: string;
+      updatedAt: string | null;
+    }
+  | { state: "unreadable"; storage: "database"; message: string };
+
+// Lazily created pool; null when the optional database is not configured.
+const pool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL }) : null;
+const TABLE_NAME = "alpaca_credentials";
+
+/**
+ * Process-local credential cache with a short TTL. Every entry written here is
+ * also what makes per-request credential loading cheap: status and dashboard
+ * endpoints poll frequently, and we do not want one SELECT per request.
+ *
+ * Entries hold their own timestamp so a long-running process (local dev, a
+ * non-serverless deployment) can revalidate against Postgres periodically and
+ * pick up writes made by other instances or devices.
+ */
+type MemoryEntry = { credentials: Credentials; updatedAt: string; writtenAt: number };
+const memoryCredentials = new Map<string, MemoryEntry>();
+const MEMORY_TTL_MS = 30_000;
+
+// Must stay in sync with `lib/db/src/schema/index.ts`.
+const TABLE_DDL = `
+  CREATE TABLE IF NOT EXISTS ${TABLE_NAME} (
+    user_id text PRIMARY KEY,
+    encrypted_api_key text NOT NULL,
+    encrypted_api_secret text NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+  )
+`;
+
+let schemaReady: Promise<void> | null = null;
+
+async function ensureSchema(): Promise<void> {
+  if (!pool) return;
+  // Cache the promise so the DDL runs at most once per process/instance even
+  // if several requests race at cold start.
+  if (!schemaReady) {
+    schemaReady = pool
+      .query(TABLE_DDL)
+      .then(() => {
+        logger.info("Alpaca credentials table is ready");
+      })
+      .catch((error: unknown) => {
+        // Clear the cache so a transient failure can be retried later.
+        schemaReady = null;
+        throw new Error(
+          `Credential storage is unavailable: could not create the ${TABLE_NAME} table. ` +
+            `Check DATABASE_URL and database permissions. ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+  }
+  return schemaReady;
 }
 
-function encryptionKey(): Buffer {
-  const raw = process.env.CREDENTIALS_ENCRYPTION_KEY;
-  if (!raw) throw new Error("CREDENTIALS_ENCRYPTION_KEY is required to persist Alpaca credentials.");
-  const key = Buffer.from(raw, /^[0-9a-f]{64}$/i.test(raw) ? "hex" : "base64");
-  if (key.length !== 32) throw new Error("CREDENTIALS_ENCRYPTION_KEY must decode to exactly 32 bytes.");
-  return key;
+function keyLast4(apiKey: string): string {
+  return apiKey.length > 4 ? apiKey.slice(-4) : apiKey;
 }
 
-function encrypt(value: string): string {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", encryptionKey(), iv);
-  const ciphertext = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
-  return [iv, cipher.getAuthTag(), ciphertext].map((part) => part.toString("base64url")).join(".");
+async function fetchStoredRow(userId: string): Promise<(StoredCredentials & { updatedAt: string | null }) | null> {
+  if (!pool || !canEncrypt()) return null;
+  await ensureSchema();
+  const result = await pool.query<StoredCredentials & { updatedAt: string | null }>(
+    `SELECT
+       encrypted_api_key AS "encryptedApiKey",
+       encrypted_api_secret AS "encryptedApiSecret",
+       updated_at AS "updatedAt"
+     FROM ${TABLE_NAME} WHERE user_id = $1 LIMIT 1`,
+    [userId],
+  );
+  return result.rows[0] ?? null;
 }
 
-function decrypt(value: string): string {
-  const [ivValue, tagValue, ciphertextValue] = value.split(".");
-  if (!ivValue || !tagValue || !ciphertextValue) throw new Error("Stored credential payload is malformed.");
-  const decipher = createDecipheriv("aes-256-gcm", encryptionKey(), Buffer.from(ivValue, "base64url"));
-  decipher.setAuthTag(Buffer.from(tagValue, "base64url"));
-  return Buffer.concat([decipher.update(Buffer.from(ciphertextValue, "base64url")), decipher.final()]).toString("utf8");
-}
+/**
+ * Validates and stores credentials for a user. Alpaca validation happens in
+ * the caller; this function only persists.
+ *
+ * - Always makes the keys active in the current process.
+ * - When a database is configured, persistence is *required*: if the table
+ *   cannot be created or the insert fails, an error is thrown instead of
+ *   silently pretending the user's keys are safely stored. On serverless
+ *   (Vercel) a memory-only save is effectively a no-op for the next request,
+ *   so it must not be reported as success.
+ * - When no database is configured (local development), the keys are stored
+ *   in memory and the result reports `persistedToDatabase: false`.
+ */
+export async function saveCredentials(
+  userId: string,
+  credentials: Credentials,
+): Promise<SaveCredentialsResult> {
+  // Make the verified credentials immediately available to this process.
+  memoryCredentials.set(userId, {
+    credentials,
+    updatedAt: new Date().toISOString(),
+    writtenAt: Date.now(),
+  });
 
-export async function saveCredentials(userId: string, credentials: Credentials): Promise<void> {
-  // Make the verified credentials immediately available to this process. This
-  // also prevents optional persistence failures from masquerading as an
-  // Alpaca connection failure.
-  memoryCredentials.set(userId, credentials);
+  if (!pool) {
+    logger.warn(
+      { userId },
+      "Alpaca credentials saved to process memory only — DATABASE_URL is not configured, persistence skipped",
+    );
+    return { persistedToDatabase: false, activeInMemory: true };
+  }
 
-  if (!pool || !canEncrypt()) return;
+  if (!canEncrypt()) {
+    throw new Error(
+      "Persistence requires CREDENTIALS_ENCRYPTION_KEY (32 bytes as 64 hex chars or base64). " +
+        "Set it in the API deployment environment so credentials can be stored for your account.",
+    );
+  }
+
+  await ensureSchema();
 
   try {
     const stored: StoredCredentials = {
@@ -66,31 +175,138 @@ export async function saveCredentials(userId: string, credentials: Credentials):
        ON CONFLICT (user_id) DO UPDATE SET encrypted_api_key = $2, encrypted_api_secret = $3, updated_at = NOW()`,
       [userId, stored.encryptedApiKey, stored.encryptedApiSecret],
     );
-  } catch {
-    // Database setup is optional for the credential connection flow. Keep the
-    // in-memory value and let the caller report success after Alpaca validation.
+    return { persistedToDatabase: true, activeInMemory: true };
+  } catch (error) {
+    logger.error({ err: error, userId }, "Failed to persist Alpaca credentials to the database");
+    throw new Error(
+      `Persistence failed: your Alpaca keys were verified but could not be saved to the database. ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 
+/**
+ * Loads stored credentials for a user. Resolution order:
+ *  1. Fresh in-memory entry (updated within MEMORY_TTL_MS) → return it.
+ *  2. PostgreSQL row → decrypt, refresh the memory cache, return it.
+ *  3. Nothing stored → null (callers run in demo mode).
+ *
+ * A stored row that cannot be decrypted (rotated CREDENTIALS_ENCRYPTION_KEY or
+ * corrupt payload) logs the failure and returns null so the request still
+ * serves demo data — but the tri-state `getCredentialStatus()` reports
+ * `unreadable` so the UI can prompt re-entry instead of claiming demo mode.
+ */
 export async function loadCredentials(userId: string): Promise<Credentials | null> {
   const inMemory = memoryCredentials.get(userId);
-  if (inMemory) return inMemory;
-  if (!pool || !canEncrypt()) return null;
+  if (inMemory && Date.now() - inMemory.writtenAt < MEMORY_TTL_MS) {
+    return inMemory.credentials;
+  }
+
+  if (!pool || !canEncrypt()) return inMemory?.credentials ?? null;
 
   try {
-    const result = await pool.query<StoredCredentials>(
-      `SELECT encrypted_api_key AS "encryptedApiKey", encrypted_api_secret AS "encryptedApiSecret"
-       FROM ${TABLE_NAME} WHERE user_id = $1 LIMIT 1`,
-      [userId],
-    );
-    const record = result.rows[0];
+    const record = await fetchStoredRow(userId);
     if (!record) return null;
-    const credentials = { apiKey: decrypt(record.encryptedApiKey), apiSecret: decrypt(record.encryptedApiSecret) };
-    memoryCredentials.set(userId, credentials);
+    const credentials: Credentials = {
+      apiKey: decrypt(record.encryptedApiKey),
+      apiSecret: decrypt(record.encryptedApiSecret),
+    };
+    memoryCredentials.set(userId, {
+      credentials,
+      updatedAt: record.updatedAt ?? new Date().toISOString(),
+      writtenAt: Date.now(),
+    });
     return credentials;
-  } catch {
-    // An unavailable or uninitialized database should fall back to demo mode,
-    // not prevent the API process from serving other requests.
+  } catch (error) {
+    // A stored row that cannot be decrypted (rotated key, corrupt payload) is
+    // NOT the same as "no credentials". We still fall back to demo data for
+    // this request so the app keeps working, but log loudly — the UI surfaces
+    // the difference via getCredentialStatus().
+    logger.error({ err: error, userId }, "Unable to load credentials from the database; falling back to demo mode");
     return null;
   }
+}
+
+/**
+ * Tri-state report used by GET /agent/credentials and the UI. Never returns
+ * secrets — only storage source, last-4 of the key, and updated-at.
+ */
+export async function getCredentialStatus(userId: string): Promise<CredentialStatus> {
+  const inMemory = memoryCredentials.get(userId);
+
+  if (pool && canEncrypt()) {
+    try {
+      const record = await fetchStoredRow(userId);
+      if (record) {
+        try {
+          const credentials: Credentials = {
+            apiKey: decrypt(record.encryptedApiKey),
+            apiSecret: decrypt(record.encryptedApiSecret),
+          };
+          // Refresh the memory cache so subsequent loads are cheap.
+          memoryCredentials.set(userId, {
+            credentials,
+            updatedAt: record.updatedAt ?? new Date().toISOString(),
+            writtenAt: Date.now(),
+          });
+          return {
+            state: "database",
+            storage: "database",
+            keyLast4: keyLast4(credentials.apiKey),
+            updatedAt: record.updatedAt,
+          };
+        } catch (error) {
+          logger.error({ err: error, userId }, "Credential row present but unreadable");
+          return {
+            state: "unreadable",
+            storage: "database",
+            message:
+              "Credentials are stored for this account but could not be decrypted. " +
+              "This usually means the server's encryption key changed. Re-enter your Alpaca keys to fix it.",
+          };
+        }
+      }
+    } catch (error) {
+      // DB down — report memory state if we have one, otherwise none.
+      logger.error({ err: error, userId }, "Unable to check credential status in the database");
+    }
+  }
+
+  if (inMemory) {
+    return { state: "memory", storage: "memory" };
+  }
+  return { state: "none", storage: null };
+}
+
+/**
+ * Removes stored credentials (memory + database row) for a user.
+ */
+export async function deleteCredentials(userId: string): Promise<{ deletedFromDatabase: boolean }> {
+  memoryCredentials.delete(userId);
+
+  if (!pool || !canEncrypt()) {
+    return { deletedFromDatabase: false };
+  }
+
+  await ensureSchema();
+  try {
+    await pool.query(`DELETE FROM ${TABLE_NAME} WHERE user_id = $1`, [userId]);
+    logger.info({ userId }, "Alpaca credentials deleted");
+    return { deletedFromDatabase: true };
+  } catch (error) {
+    logger.error({ err: error, userId }, "Failed to delete Alpaca credentials from the database");
+    throw new Error(
+      `Delete failed: your keys were removed from this server's memory but the database row could not be removed. ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/**
+ * Test helper — clears the per-process cache and any cached schema promise so
+ * each test starts from a clean slate. Does not drop the table.
+ */
+export function _resetCredentialCacheForTests(): void {
+  memoryCredentials.clear();
+  schemaReady = null;
 }

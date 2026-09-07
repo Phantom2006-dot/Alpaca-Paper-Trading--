@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request as ExpressRequest } from "express";
 import { getAuth } from "@clerk/express";
 
 import {
@@ -28,11 +28,63 @@ import {
   stopAgent,
   validateAlpacaCredentials,
 } from "../lib/strategy";
-import { saveCredentials } from "../lib/credentials";
+import {
+  deleteCredentials,
+  getCredentialStatus,
+  saveCredentials,
+} from "../lib/credentials";
 import { queryPowerX } from "../lib/powerx";
+import { isOriginAllowed } from "../lib/cors";
 
 const router: IRouter = Router();
 const localDemoAuth = process.env["ALLOW_LOCAL_DEV_AUTH"] === "true";
+
+type CredentialsRequest = ExpressRequest & { resolvedUserId?: string };
+
+function requireUserId(req: CredentialsRequest): string | null {
+  const resolved = req.resolvedUserId;
+  if (resolved) return resolved;
+  if (localDemoAuth) return "local-dev-user";
+  return getAuth(req).userId ?? null;
+}
+
+/** GET — report whether the signed-in user has credentials on file (no secrets). */
+router.get("/agent/credentials", async (req, res): Promise<void> => {
+  const userId = requireUserId(req);
+  if (!userId) {
+    res.status(401).json({ error: "Authentication required." });
+    return;
+  }
+  try {
+    res.json(await getCredentialStatus(userId));
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : "Unable to check credential status.";
+    req.log.error({ err: error }, "Credential status check failed");
+    res.status(503).json({ error: msg });
+  }
+});
+
+/** DELETE — remove stored credentials (memory + database row). */
+router.delete("/agent/credentials", async (req, res): Promise<void> => {
+  const userId = requireUserId(req);
+  if (!userId) {
+    res.status(401).json({ error: "Authentication required." });
+    return;
+  }
+  try {
+    const { deletedFromDatabase } = await deleteCredentials(userId);
+    res.json({
+      message: deletedFromDatabase
+        ? "Alpaca credentials removed from your account. You are back in demo mode."
+        : "Alpaca credentials removed for this session. No database row existed to delete.",
+      deleted: true,
+    });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : "Unable to remove credentials.";
+    req.log.warn({ err: error }, "Credential delete failed");
+    res.status(503).json({ error: msg });
+  }
+});
 
 router.post("/agent/credentials", async (req, res): Promise<void> => {
   const apiKey = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
@@ -41,18 +93,29 @@ router.post("/agent/credentials", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Both API key and secret are required." });
     return;
   }
-  const userId = localDemoAuth ? "local-dev-user" : getAuth(req).userId;
+  const userId = requireUserId(req);
   if (!userId) {
     res.status(401).json({ error: "Authentication required." });
     return;
   }
   try {
     await validateAlpacaCredentials({ apiKey, apiSecret });
-    await saveCredentials(userId, { apiKey, apiSecret });
-    res.json({ message: "Paper trading credentials verified and saved for this user." });
+    const result = await saveCredentials(userId, { apiKey, apiSecret });
+    res.json({
+      message: result.persistedToDatabase
+        ? "Paper trading credentials verified, encrypted, and saved to your account. They will be loaded automatically on your next login."
+        : "Paper trading credentials verified and active for this session. Database persistence is not configured, so they will not survive a redeploy or restart.",
+      persisted: result.persistedToDatabase,
+      storage: result.persistedToDatabase ? "database" : "memory",
+    });
   } catch (error) {
-    req.log.warn({ err: error }, "Alpaca credential verification failed");
-    res.status(422).json({ error: error instanceof Error ? error.message : "Alpaca rejected these credentials." });
+    const msg = error instanceof Error ? error.message : "Alpaca rejected these credentials.";
+    req.log.warn({ err: error }, "Alpaca credential save failed");
+    const isPersistenceError =
+      msg.includes("Persistence") ||
+      msg.includes("CREDENTIALS_ENCRYPTION_KEY") ||
+      msg.includes("Credential storage");
+    res.status(isPersistenceError ? 503 : 422).json({ error: msg });
   }
 });
 
@@ -206,15 +269,18 @@ router.get("/agent/audit", (req, res): void => {
 });
 
 // ─── SSE CONSOLE PIPELINE STREAM ─────────────────────────────────────────────
-const SSE_ALLOWED = ["https://kairo-trade-agent.vercel.app", "https://kairo-nu-two.vercel.app", "http://localhost:24492", "http://127.0.0.1:24492"];
+// CORS for this route must always match the shared allowlist (src/lib/cors.ts)
+// so the same env-driven origins work for both regular JSON endpoints and the
+// streaming console. Set CORS_ORIGINS / CORS_ORIGIN to allow extra domains.
 
 router.options("/agent/console/stream", (req, res): void => {
   const origin = req.headers["origin"];
-  if (origin && SSE_ALLOWED.includes(origin)) {
+  if (origin && isOriginAllowed(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Access-Control-Allow-Credentials", "true");
     res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    res.setHeader("Vary", "Origin");
   }
   res.sendStatus(204);
 });
@@ -228,16 +294,19 @@ router.get("/agent/console/stream", async (req, res): Promise<void> => {
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
-  // Explicit CORS headers for SSE — Vercel edge may not propagate the cors() middleware headers
-  // for streaming responses, so we set them directly here.
+  // Explicit CORS headers for SSE — Vercel edge may not propagate the cors()
+  // middleware headers for streaming responses, so we set them directly here.
   const origin = req.headers["origin"];
-  if (origin && SSE_ALLOWED.includes(origin)) {
+  if (origin && isOriginAllowed(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
   }
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.flushHeaders();
 
   const emit = (event: object) => {
+    // Never write to a response the client has left or the platform closed.
+    if (res.writableEnded || res.destroyed) return;
     res.write(`data: ${JSON.stringify(event)}\n\n`);
   };
 

@@ -2208,6 +2208,16 @@
   border-color: hsl(var(--destructive) / 0.3);
   color: hsl(var(--destructive));
 }
+.notice-banner.is-warning {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.3);
+  color: rgb(245, 158, 11);
+}
+.notice-banner.is-success {
+  background: rgba(34, 197, 94, 0.08);
+  border-color: rgba(34, 197, 94, 0.3);
+  color: rgb(34, 197, 94);
+}
 
 .button-danger {
   background: hsl(var(--destructive));

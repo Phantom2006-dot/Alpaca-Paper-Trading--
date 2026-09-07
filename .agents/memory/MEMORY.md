@@ -5,6 +5,14 @@ _Last updated: after repo pull task_
 
 ## Session Log
 
+### Session 8 — Per-user agent state + credential tri-state/status/delete + env CORS
+- Refactored `artifacts/api-server/src/lib/strategy.ts`: all module-global mutable agent state moved into a per-user `AgentRuntimeState` resolved from the AsyncLocalStorage session (`agentState()`); automation loop re-enters the owning user's context each tick via `withUserCredentials(state.userId, …)`. Users no longer share positions/activity/audit/automation.
+- `credentials.ts` split crypto into `crypto.ts` (testable), added `getCredentialStatus()` (`none|memory|database|unreadable`) + `deleteCredentials()`, 30s memory TTL cache, distinct logging for decrypt failure vs DB outage.
+- New routes: `GET /agent/credentials` (no secrets; keyLast4, storage, updatedAt) and `DELETE /agent/credentials`. Frontend Credentials page shows saved state banner, Remove button, unreadable prompt.
+- CORS centralized env-driven in `src/lib/cors.ts` (`CORS_ORIGINS`/`CORS_ORIGIN` + defaults incl. kairo-trade-agent + kairo-nu-two vercel apps + localhost). Removed hardcoded single-origin header from `artifacts/api-server/vercel.json`.
+- Deployment reality: two Vercel projects — frontend `kairo` and API `kairo-api` — each on own production URL; README documents env per project (`VITE_API_URL`, `CLERK_SECRET_KEY`, `DATABASE_URL`, `CREDENTIALS_ENCRYPTION_KEY`, `CORS_ORIGINS`).
+- Added 16 `node:test` cases (`crypto.test.ts`, `credentials.test.ts`, `strategy.test.ts`) runnable offline via store tsx: `node node_modules/.pnpm/tsx@4.23.1/node_modules/tsx/dist/cli.mjs --test artifacts/api-server/src/lib/*.test.ts`.
+
 ### Session 1 — Architecture Review (PowerX / nanobot fork)
 - Full codebase review of PowerX (nanobot fork with custom trading engine).
 - Produced 9-layer architecture breakdown: AgentLoop, AgentRunner, Provider Abstraction, Tool System, Trading Engine, Skills System, Session & Memory, Channels & Gateway, Deployment.

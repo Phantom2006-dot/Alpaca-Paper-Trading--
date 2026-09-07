@@ -1,4 +1,4 @@
-Alpaca credentials entered in the Credentials page are first verified against the paper `/v2/account` endpoint, then stored in server memory and scoped to the signed-in Clerk user. The execution adapter remains locked to `paper-api.alpaca.markets`.
+Alpaca credentials entered in the Credentials page are first verified against the paper `/v2/account` endpoint, then encrypted with AES-256-GCM and stored in Postgres scoped to the signed-in Clerk user (loaded automatically on every login). The execution adapter remains locked to `paper-api.alpaca.markets`.
 # Kairo AI Trading Agent
 
 An explainable, paper-only AI trading cockpit built on Alpaca Markets. Kairo scans market data, formulates a thesis, passes every decision through deterministic risk gates, executes paper orders, and exposes an audit trail in real time.
@@ -74,7 +74,9 @@ API Server (Express 5 :8080)
 | `POST` | `/api/agent/optimize` | Grid-search threshold optimization (72 candidates) |
 | `GET` | `/api/agent/audit` | All audit run records |
 | `GET` | `/api/agent/console/stream` | SSE pipeline stream (7 steps) |
-| `POST` | `/api/agent/credentials` | Store paper credentials in memory for the signed-in user |
+| `GET` | `/api/agent/credentials` | Credential status (no secrets): state, storage source, key last-4, updated-at |
+| `POST` | `/api/agent/credentials` | Verify + store paper credentials for the signed-in user |
+| `DELETE` | `/api/agent/credentials` | Remove stored credentials (memory + database row) |
 
 ---
 
@@ -175,7 +177,16 @@ CREDENTIALS_ENCRYPTION_KEY=<64_hex_characters>
 
 The public landing page still renders if the Vite key is missing, but authenticated app routes require Clerk when the key is configured. Without `DATABASE_URL`, authenticated demo/status endpoints still work, but saving Alpaca credentials is disabled until Postgres and encryption are configured. Alpaca credentials entered in the Credentials page are verified against the paper `/v2/account` endpoint, encrypted with `CREDENTIALS_ENCRYPTION_KEY`, and stored in Postgres scoped to the signed-in Clerk user. The execution adapter remains locked to `paper-api.alpaca.markets`.
 
-For a deployed frontend, set `VITE_API_URL` in Vercel to the public HTTPS URL of the deployed API server, for example `https://your-api.example.com`. The API server must also have `CLERK_SECRET_KEY`, enable the frontend origin in CORS, and be reachable over HTTPS. Do not point a production frontend at `localhost:8080`.
+### Deploying the two Vercel projects
+
+The repo is deployed as two separate Vercel projects, each with its own production URL:
+
+1. **Frontend (`kairo`)** — builds the React cockpit. Set `VITE_API_URL` to the API's public HTTPS URL and `VITE_CLERK_PUBLISHABLE_KEY` to the Clerk publishable key.
+2. **API (`kairo-api`, `artifacts/api-server`)** — builds the Express API. Set `CLERK_SECRET_KEY`, `DATABASE_URL`, and `CREDENTIALS_ENCRYPTION_KEY`. The DB table is created lazily — no migration step needed.
+
+CORS is env-driven from a single allowlist (`artifacts/api-server/src/lib/cors.ts`). On the **API** deployment set `CORS_ORIGINS` to a comma-separated list of the exact frontend origins that may call it, including the frontend's production URL (and any preview domains you want to allow). The two known `.vercel.app` frontend origins and localhost dev origins are already built in as defaults; custom/aliased domains must be added via `CORS_ORIGINS` (or the legacy single-value `CORS_ORIGIN`). The API server must be reachable over HTTPS.
+
+Do not point a production frontend at `localhost:8080`.
 
 ### Build
 
@@ -213,9 +224,11 @@ pnpm --filter @workspace/db run push
 | `ALPACA_API_SECRET` | Optional | Enables paper mode |
 | `CLERK_SECRET_KEY` | Required for protected API routes | Verifies Clerk bearer tokens |
 | `VITE_CLERK_PUBLISHABLE_KEY` | Optional local fallback; required for sign-in | Enables Clerk in the Vite app; stored in `artifacts/alpaca-agent/.env.local` |
-| `VITE_API_URL` | Optional locally; required for separate production API | Public base URL for the Express API server |
-| `DATABASE_URL` | Required for persisted credentials | Postgres connection string for the credential store |
+| `VITE_API_URL` | Optional locally; required for separate production API | Public base URL for the Express API server (set on the frontend Vercel project) |
+| `DATABASE_URL` | Required for persisted credentials | Postgres connection string for the credential store (set on the API Vercel project) |
 | `CREDENTIALS_ENCRYPTION_KEY` | Required for persisted credentials | 32-byte AES-256-GCM key, supplied as 64 hex characters or base64 |
+| `CORS_ORIGINS` | Optional on the API project | Comma-separated exact browser origins allowed to call the API (custom frontend URLs, previews). Defaults already cover the known `.vercel.app` frontends + localhost dev |
+| `CORS_ORIGIN` | Optional (legacy) | Single-origin alternative to `CORS_ORIGINS` |
 | `PORT` | Optional | API server port (default: 8080) |
 
 ---

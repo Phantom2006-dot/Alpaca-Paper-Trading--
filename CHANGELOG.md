@@ -4,6 +4,23 @@ All completed work is recorded here after every prompt request.
 
 ---
 
+## [Session 8] — Per-user agent state, credential tri-state + status/delete, env-driven CORS
+
+### Completed
+- **Per-user agent runtime** (`strategy.ts`): all previously module-global engine state (activity trail, audit runs, demo positions, trailing extremes, automation loop, scan counters) is now scoped per Clerk user via the AsyncLocalStorage session. Users sharing one process no longer read or clobber each other's agent state. The automation timer re-enters the owning user's session each tick.
+- **Credential tri-state** (`credentials.ts` + new `crypto.ts`): AES-256-GCM helpers extracted and unit-tested; status distinguishes `none` / `memory` / `database` / `unreadable` so a rotated `CREDENTIALS_ENCRYPTION_KEY` no longer masquerades as demo mode. Added a 30s in-memory TTL so status/dashboard polling does not hit Postgres on every request.
+- **`GET`/`DELETE /api/agent/credentials`**: status report (no secrets — storage source, key last-4, updated-at) and removal of stored keys. Frontend Credentials page shows saved-state banner, Remove button, and unreadable warning.
+- **CORS is fully env-driven**: origins read from `CORS_ORIGINS` / `CORS_ORIGIN`, with the known `.vercel.app` frontends + localhost as defaults; removed the hardcoded single-origin header from `artifacts/api-server/vercel.json` that would break a custom frontend domain.
+- **Docs**: README updated with the two-Vercel-project deployment guide (`kairo` frontend + `kairo-api` backend), new endpoints, and `CORS_ORIGINS` env var.
+- **Tests**: 16 `node:test` cases across `crypto`, `credentials`, and `strategy` (per-user isolation, automation scoping, demo positions). Typecheck clean for all packages.
+
+### Files modified
+- `artifacts/api-server/src/lib/credentials.ts`, `crypto.ts` (new), `strategy.ts`, `routes/agent.ts`, `app.ts`, `vercel.json`
+- `artifacts/alpaca-agent/src/pages/CredentialsPage.tsx`, `src/index.css`
+- `README.md`, `CHANGELOG.md`
+
+---
+
 ## [Session 6] — Route Restructure: / → Landing, /dashboard → App
 
 ### Completed

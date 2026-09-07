@@ -6,6 +6,7 @@ import healthRouter from "./routes/health";
 import agentRouter from "./routes/agent";
 import { withUserCredentials } from "./lib/strategy";
 import { logger } from "./lib/logger";
+import { getAllowedOrigins } from "./lib/cors";
 
 const app: Express = express();
 
@@ -28,15 +29,8 @@ app.use(
     },
   }),
 );
-app.use(cors({
-  origin: [
-    "https://kairo-trade-agent.vercel.app",
-    "https://kairo-nu-two.vercel.app",
-    ...(process.env["CORS_ORIGIN"] ? [process.env["CORS_ORIGIN"]] : []),
-    ...(process.env["NODE_ENV"] !== "production" ? ["http://localhost:24492", "http://127.0.0.1:24492"] : []),
-  ],
-  credentials: true,
-}));
+// Origin allowlist is centralized and env-driven — see src/lib/cors.ts.
+app.use(cors({ origin: getAllowedOrigins(), credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -56,15 +50,19 @@ if (!localDemoAuth && !process.env.CLERK_SECRET_KEY) {
       res.status(401).json({ error: "Authentication required." });
       return;
     }
-    // Skip withUserCredentials for routes that work without credentials.
-    const PUBLIC_PATHS = ["/agent/credentials", "/agent/status", "/agent/console/stream"];
-    // Also skip auth for OPTIONS preflight on any path
+    // OPTIONS preflights must pass through immediately — no credential loading.
     if (req.method === "OPTIONS") { next(); return; }
-    if (PUBLIC_PATHS.some((p) => req.path === p || req.path.startsWith(p + "/"))) {
+    // /agent/credentials (GET/POST/DELETE) manages the credential store itself
+    // — only resolve the user id, never load credentials here.
+    if (req.path === "/agent/credentials") {
       (req as Request & { resolvedUserId?: string }).resolvedUserId = userId;
       next();
       return;
     }
+    // All other routes — including /agent/status and /agent/console/stream —
+    // attempt to load credentials from the DB so the user's saved keys are
+    // available on every request after login, without requiring a manual re-entry.
+    // withUserCredentials falls back to demo mode gracefully if none are found.
     try {
       await withUserCredentials(userId, next);
     } catch (error) {
