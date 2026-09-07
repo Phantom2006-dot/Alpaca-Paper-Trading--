@@ -261,10 +261,11 @@ export function ChatPage() {
     id: 'welcome',
     role: 'agent',
     ts: new Date(),
-    text: `Hi! I'm Kairo, your paper trading agent.\n\nI can show your portfolio, explain how the strategies work, tell you what the agent is doing, and place paper orders for you.\n\nTry: "show my positions", "buy 10 SPY", or "how does Z-score work".`,
+    text: `Hi! I'm Kairo, your paper trading agent.\n\nI can show your portfolio, explain how the strategies work, tell you what the agent is doing, and place paper orders for you.\n\nTry: "show my positions", "buy 10 SPY", or ask me anything about trading.`,
   }]);
   const [input, setInput] = useState('');
-  const [confirming, setConfirming] = useState<string | null>(null); // msg id being confirmed
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [thinking, setThinking] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -280,12 +281,44 @@ export function ChatPage() {
 
   function send(text: string) {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed || thinking) return;
     setInput('');
 
     addMsg({ role: 'user', ts: new Date(), text: trimmed });
 
     const intent = parseIntent(trimmed);
+    if (intent.type === 'unknown') {
+      // Fall through to PowerX with live context
+      setThinking(true);
+      const ctx = {
+        mode: statusQuery.data?.mode,
+        equity: accountQuery.data?.account.equity,
+        cash: accountQuery.data?.account.cash,
+        positions: accountQuery.data?.positions.map((p) => ({
+          symbol: p.symbol, qty: p.qty, side: p.side, unrealizedPnl: p.unrealizedPnl,
+        })),
+        running: statusQuery.data?.running,
+        symbols: statusQuery.data?.symbols,
+        lastRunAt: statusQuery.data?.lastRunAt,
+      };
+      getToken().then((token) =>
+        fetch(`${API}/api/agent/powerx`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          body: JSON.stringify({ text: trimmed, agentContext: ctx }),
+        })
+          .then((r) => r.json())
+          .then((data) => {
+            addMsg({ role: 'agent', ts: new Date(), text: data.reply ?? data.error ?? 'No response.' });
+          })
+          .catch(() => {
+            addMsg({ role: 'agent', ts: new Date(), text: 'I couldn\'t reach the AI backend right now. Try again in a moment.', error: true });
+          })
+          .finally(() => setThinking(false))
+      );
+      return;
+    }
+
     const { text: replyText, orderPreview } = buildAgentReply(intent, statusQuery.data, accountQuery.data);
     addMsg({ role: 'agent', ts: new Date(), text: replyText, orderPreview });
   }
@@ -357,6 +390,12 @@ export function ChatPage() {
             confirming={confirming === msg.id}
           />
         ))}
+        {thinking && (
+          <div className="chat-bubble-wrap is-agent">
+            <div className="chat-avatar is-agent"><Bot size={14} /></div>
+            <div className="chat-bubble is-agent"><span className="chat-thinking">Kairo is thinking…</span></div>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
 
@@ -378,7 +417,7 @@ export function ChatPage() {
         <button
           className="button button-primary chat-send-btn"
           onClick={() => send(input)}
-          disabled={!input.trim()}
+          disabled={!input.trim() || thinking}
           aria-label="Send"
         >
           <Send size={15} />

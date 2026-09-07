@@ -206,6 +206,19 @@ router.get("/agent/audit", (req, res): void => {
 });
 
 // ─── SSE CONSOLE PIPELINE STREAM ─────────────────────────────────────────────
+const SSE_ALLOWED = ["https://kairo-trade-agent.vercel.app", "https://kairo-nu-two.vercel.app", "http://localhost:24492", "http://127.0.0.1:24492"];
+
+router.options("/agent/console/stream", (req, res): void => {
+  const origin = req.headers["origin"];
+  if (origin && SSE_ALLOWED.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+  }
+  res.sendStatus(204);
+});
+
 router.get("/agent/console/stream", async (req, res): Promise<void> => {
   const symbol = String(req.query["symbol"] ?? "SPY").trim().toUpperCase();
   const strategyMode = (req.query["strategyMode"] === "ict_hmm" ? "ict_hmm" : "zscore") as "zscore" | "ict_hmm";
@@ -218,8 +231,7 @@ router.get("/agent/console/stream", async (req, res): Promise<void> => {
   // Explicit CORS headers for SSE — Vercel edge may not propagate the cors() middleware headers
   // for streaming responses, so we set them directly here.
   const origin = req.headers["origin"];
-  const allowed = ["https://kairo-trade-agent.vercel.app", "https://kairo-nu-two.vercel.app", "http://localhost:24492", "http://127.0.0.1:24492"];
-  if (origin && allowed.includes(origin)) {
+  if (origin && SSE_ALLOWED.includes(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
   }
   res.setHeader("Access-Control-Allow-Credentials", "true");
@@ -405,6 +417,7 @@ router.post("/agent/powerx", async (req, res): Promise<void> => {
   const text = typeof req.body?.text === "string" ? req.body.text.trim() : undefined;
   const mimeType = typeof req.body?.mimeType === "string" ? req.body.mimeType.trim() : undefined;
   const poll = req.body?.poll === true;
+  const agentContext = req.body?.agentContext && typeof req.body.agentContext === "object" ? req.body.agentContext : undefined;
 
   let fileBytes: Buffer | undefined;
   if (typeof req.body?.fileBase64 === "string" && mimeType) {
@@ -422,7 +435,7 @@ router.post("/agent/powerx", async (req, res): Promise<void> => {
   }
 
   try {
-    const reply = await queryPowerX({ text, fileBytes, mimeType, poll });
+    const reply = await queryPowerX({ text, fileBytes, mimeType, poll, agentContext });
     res.json({ reply });
   } catch (error) {
     req.log.error({ err: error }, "PowerX query failed");

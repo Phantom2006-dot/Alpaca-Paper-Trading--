@@ -2645,3 +2645,10 @@
 }
 .chat-input:focus { border-color: hsl(var(--primary)/0.5); }
 .chat-send-btn { flex-shrink: 0; padding: 9px 14px; }
+
+.chat-thinking {
+  font-style: italic;
+  opacity: 0.6;
+  font-size: 12px;
+  animation: pulse 1.4s ease-in-out infinite;
+}

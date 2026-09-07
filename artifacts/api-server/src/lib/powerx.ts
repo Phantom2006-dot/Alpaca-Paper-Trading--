@@ -17,11 +17,41 @@ interface ChatCompletionResponse {
   choices: [{ message: { content: string } }];
 }
 
+export interface AgentContext {
+  mode?: string;
+  equity?: number;
+  cash?: number;
+  positions?: Array<{ symbol: string; qty: number; side: string; unrealizedPnl: number }>;
+  running?: boolean;
+  symbols?: string[];
+  lastRunAt?: string | null;
+}
+
 export interface PowerXOptions {
   text?: string;
   fileBytes?: Buffer;
   mimeType?: string;
   poll?: boolean;
+  agentContext?: AgentContext;
+}
+
+function buildSystemPrompt(ctx: AgentContext): string {
+  const pos = ctx.positions?.length
+    ? ctx.positions.map((p) => `  - ${p.symbol}: ${p.qty} shares ${p.side}, unrealized P&L $${p.unrealizedPnl.toFixed(2)}`).join("\n")
+    : "  No open positions.";
+  return `You are Kairo, an AI paper trading agent built on Alpaca Markets. You help users understand their paper portfolio and trading strategies. Always be concise and specific to the user's actual data below.
+
+Current account state:
+- Mode: ${ctx.mode ?? "unknown"} (paper trading only, no real money)
+- Equity: $${ctx.equity?.toLocaleString("en-US", { minimumFractionDigits: 2 }) ?? "unknown"}
+- Cash: $${ctx.cash?.toLocaleString("en-US", { minimumFractionDigits: 2 }) ?? "unknown"}
+- Agent running: ${ctx.running ? `yes, scanning ${ctx.symbols?.join(", ") ?? ""}` : "no"}
+- Last scan: ${ctx.lastRunAt ? new Date(ctx.lastRunAt).toLocaleTimeString() : "never"}
+
+Open positions:
+${pos}
+
+Strategies available: Z-score mean-reversion (entry at |Z|≥2σ, ADX<25, volume≥1×) and ICT/HMM 5-cluster. All orders are paper only.`;
 }
 
 function buildPayload(opts: PowerXOptions): object {
@@ -41,10 +71,13 @@ function buildPayload(opts: PowerXOptions): object {
 
   if (parts.length === 0) throw new Error("Provide text or file data.");
 
-  return {
-    model: MODEL_NAME,
-    messages: [{ role: "user", content: parts }],
-  };
+  const messages: Array<{ role: string; content: string | ContentPart[] }> = [];
+  if (opts.agentContext) {
+    messages.push({ role: "system", content: buildSystemPrompt(opts.agentContext) });
+  }
+  messages.push({ role: "user", content: parts });
+
+  return { model: MODEL_NAME, messages };
 }
 
 async function post(payload: object): Promise<unknown> {
