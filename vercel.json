@@ -1,23 +1,13 @@
 {
-  "buildCommand": "pnpm run build",
-  "devCommand": "pnpm run dev",
+  "buildCommand": "pnpm --filter @workspace/api-server run build",
   "installCommand": "pnpm install --frozen-lockfile",
-  "framework": "vite",
-  "outputDirectory": "artifacts/alpaca-agent/dist/public",
-  "ignoreCommand": "git diff --quiet HEAD~ HEAD -- ./",
   "functions": {
-    "api/**/*.ts": {
-      "maxDuration": 300
+    "api/index.ts": {
+      "maxDuration": 60
     }
   },
   "rewrites": [
-    {
-      "source": "/api/:path*",
-      "destination": "/api/:path*"
-    },
-    {
-      "source": "/:path((?!api(?:/|$)|_next/static|_next/image|favicon.ico).*)",
-      "destination": "/index.html"
-    }
-  ]
+    { "source": "/(.*)", "destination": "/api/index" }
+  ],
+  "outputDirectory": "artifacts/api-server/dist"
 }

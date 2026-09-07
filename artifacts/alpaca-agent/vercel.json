@@ -1,0 +1,8 @@
+{
+  "buildCommand": "cd ../.. && pnpm --filter @workspace/alpaca-agent run build",
+  "installCommand": "cd ../.. && pnpm install --frozen-lockfile",
+  "outputDirectory": "artifacts/alpaca-agent/dist/public",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

@@ -48,5 +48,9 @@ Thumbs.db
 
 # Replit
 .cache/
-.local/
+.local/.vercel
+# Vercel serverless function shim — keep in version control
+# api/index.ts is intentionally committed (not in artifacts/)
+# because Vercel expects an api/ directory at the project root.
 .vercel
+.env*
