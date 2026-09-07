@@ -993,7 +993,10 @@ function BacktestPage() {
     setResult(null);
     run.mutate({ data: { ...input, settings: { entryZ: Number(entryZ), adxMax: Number(adxMax), minVolumeRatio: Number(minVolumeRatio) } } }, {
       onSuccess: (backtest) => setResult(backtest),
-      onError: () => setNotice('The Alpaca backtest could not be completed. Check the date range and API connection, then retry.'),
+      onError: (err: unknown) => {
+        const msg = (err as any)?.response?.data?.error ?? (err as any)?.message ?? 'The backtest could not be completed.';
+        setNotice(msg.includes('credentials') ? '⚠️ Alpaca credentials are required for backtesting. Add them on the Credentials page.' : msg);
+      },
     });
   };
 
@@ -1004,7 +1007,10 @@ function BacktestPage() {
     setOptimization(null);
     optimize.mutate({ data: input }, {
       onSuccess: (optimized) => setOptimization(optimized),
-      onError: () => setNotice('The strategy optimization could not be completed. Check the date range and API connection, then retry.'),
+      onError: (err: unknown) => {
+        const msg = (err as any)?.response?.data?.error ?? (err as any)?.message ?? 'The optimization could not be completed.';
+        setNotice(msg.includes('credentials') ? '⚠️ Alpaca credentials are required for optimization. Add them on the Credentials page.' : msg);
+      },
     });
   };
 

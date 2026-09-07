@@ -1529,6 +1529,7 @@ export async function optimizeBacktest(
   const entryZValues = [1.25, 1.5, 1.75, 2, 2.25, 2.5];
   const adxMaxValues = [15, 20, 25, 30];
   const volumeRatioValues = [0.8, 1, 1.2];
+  const OPTIMIZE_DEADLINE = Date.now() + 50_000; // 50 s — stay inside Vercel 60 s limit
   const candidates: Array<{
     settings: {
       entryZ: number;
@@ -1547,6 +1548,7 @@ export async function optimizeBacktest(
     for (const adxMax of adxMaxValues) {
       for (const minVolumeRatio of volumeRatioValues) {
         const settings = { entryZ, adxMax, minVolumeRatio };
+        if (Date.now() > OPTIMIZE_DEADLINE) break;
         const result = await runBacktest(
           selectedSymbols,
           start,
@@ -1568,6 +1570,7 @@ export async function optimizeBacktest(
           result,
         });
       }
+      if (Date.now() > OPTIMIZE_DEADLINE) break;
     }
   }
 

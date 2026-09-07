@@ -166,10 +166,10 @@ router.post("/agent/backtest", async (req, res): Promise<void> => {
       ),
     );
   } catch (error) {
+    const msg = error instanceof Error ? error.message : "Historical backtest failed";
     req.log.error({ err: error }, "Historical backtest failed");
-    res.status(502).json({
-      error: error instanceof Error ? error.message : "Historical backtest failed",
-    });
+    const isCredentialError = msg.toLowerCase().includes("credentials") || msg.toLowerCase().includes("alpaca");
+    res.status(isCredentialError ? 422 : 502).json({ error: msg });
   }
 });
 
@@ -193,10 +193,10 @@ router.post("/agent/optimize", async (req, res): Promise<void> => {
       ),
     );
   } catch (error) {
+    const msg = error instanceof Error ? error.message : "Strategy optimization failed";
     req.log.error({ err: error }, "Strategy optimization failed");
-    res.status(502).json({
-      error: error instanceof Error ? error.message : "Strategy optimization failed",
-    });
+    const isCredentialError = msg.toLowerCase().includes("credentials") || msg.toLowerCase().includes("alpaca");
+    res.status(isCredentialError ? 422 : 502).json({ error: msg });
   }
 });
 
