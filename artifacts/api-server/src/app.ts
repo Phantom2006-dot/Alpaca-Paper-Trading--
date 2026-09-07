@@ -56,8 +56,9 @@ if (!localDemoAuth && !process.env.CLERK_SECRET_KEY) {
       res.status(401).json({ error: "Authentication required." });
       return;
     }
-    // Skip withUserCredentials for the credentials route itself.
-    if (req.path === "/agent/credentials") {
+    // Skip withUserCredentials for routes that work without credentials.
+    const PUBLIC_PATHS = ["/agent/credentials", "/agent/status"];
+    if (PUBLIC_PATHS.some((p) => req.path === p || req.path.startsWith(p + "/"))) {
       (req as Request & { resolvedUserId?: string }).resolvedUserId = userId;
       next();
       return;
