@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useAuth } from '@clerk/react';
 import { RefreshCw, ChevronRight, ChevronDown, AlertTriangle, Search, X } from 'lucide-react';
 
 function cx(...c: Array<string | false | null | undefined>) {
@@ -47,7 +48,10 @@ function JsonBlock({ label, data }: { label: string; data: object | null }) {
   );
 }
 
+const API = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, '') ?? '';
+
 export function AuditPage() {
+  const { getToken } = useAuth();
   const [runs, setRuns] = useState<AuditRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -60,8 +64,10 @@ export function AuditPage() {
     setLoading(true);
     setError('');
     try {
-      const base = (window as any).__API_BASE__ ?? '/api';
-      const res = await fetch(`${base}/agent/audit`);
+      const token = await getToken();
+      const res = await fetch(`${API}/api/agent/audit`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setRuns(Array.isArray(data) ? data : []);

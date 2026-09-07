@@ -90,6 +90,7 @@ import { useAuth, useClerk, UserButton } from '@clerk/react';
 const hasClerk = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
 const TELEGRAM_BOT_URL = 'https://t.me/Superrhhbot';
 import { CredentialsPage } from '@/pages/CredentialsPage';
+import { ChatPage } from '@/pages/ChatPage';
 
 const queryClient = new QueryClient();
 
@@ -104,6 +105,7 @@ const navItems = [
   { href: '/account', label: 'Account & orders', short: 'ACCOUNT', icon: WalletCards },
   { href: '/architecture', label: 'Architecture', short: 'ARCH', icon: GitBranch },
   { href: '/credentials', label: 'Credentials', short: 'CREDS', icon: KeyRound },
+  { href: '/chat', label: 'Agent Chat', short: 'CHAT', icon: MessageCircle },
 ];
 
 const fallbackSnapshots: SymbolSnapshot[] = [];
@@ -1542,6 +1544,7 @@ function AuthenticatedRouter() {
               <Route path="/settings" component={SettingsPage} />
               <Route path="/account" component={AccountPage} />
               <Route path="/credentials" component={CredentialsPage} />
+              <Route path="/chat" component={ChatPage} />
               <Route component={NotFound} />
         </Switch>
       </Shell> : <LandingPage />}
@@ -1566,6 +1569,7 @@ function DemoRouter() {
           <Route path="/settings" component={SettingsPage} />
           <Route path="/account" component={AccountPage} />
           <Route path="/credentials" component={CredentialsPage} />
+          <Route path="/chat" component={ChatPage} />
           <Route component={NotFound} />
         </Switch>
       </Shell>

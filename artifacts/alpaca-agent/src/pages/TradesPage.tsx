@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useAuth } from '@clerk/react';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Check, Info, RefreshCw, ShoppingCart, TrendingDown, TrendingUp, X } from 'lucide-react';
 import {
@@ -36,7 +37,10 @@ type OrderResult = {
   message: string;
 };
 
+const API = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, '') ?? '';
+
 export function TradesPage() {
+  const { getToken } = useAuth();
   const queryClient = useQueryClient();
   const accountQuery = useGetAgentAccount({ query: { queryKey: getGetAgentAccountQueryKey(), refetchInterval: 15000 } });
   const statusQuery = useGetAgentStatus({ query: { queryKey: getGetAgentStatusQueryKey(), refetchInterval: 30000 } });
@@ -64,9 +68,10 @@ export function TradesPage() {
     setPending(true);
     setNotice(null);
     try {
-      const res = await fetch('/api/agent/trade', {
+      const token = await getToken();
+      const res = await fetch(`${API}/api/agent/trade`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({
           symbol: sym,
           side,
