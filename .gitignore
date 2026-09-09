@@ -54,3 +54,4 @@ Thumbs.db
 # because Vercel expects an api/ directory at the project root.
 .vercel
 .env*
+!.env.example
