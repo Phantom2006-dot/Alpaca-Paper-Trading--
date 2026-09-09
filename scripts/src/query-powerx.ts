@@ -11,13 +11,15 @@
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
-const API_URL = "https://minis-yzdb.onrender.com/v1/chat/completions";
-const MODEL_NAME = "powerx-agent";
-const POLL_INTERVAL_MS = 2_000;
-const POLL_TIMEOUT_MS = 30_000;
+const API_URL = `${(process.env["POWERX_API_URL"] ?? "https://http--powerx-app--cmttpj77q5vc.code.run/v1").replace(/\/+$/, "")}/chat/completions`;
+const MODEL_NAME = process.env["POWERX_MODEL"] ?? "powerx-agent";
+const POLL_INTERVAL_MS = Number(process.env["POWERX_POLL_INTERVAL_MS"] ?? 2_000);
+const POLL_TIMEOUT_MS = Number(process.env["POWERX_POLL_TIMEOUT_MS"] ?? 30_000);
 
 function getToken(): string {
-  return process.env["POWERX_API_TOKEN"] ?? "<your_powerx_api_token>";
+  const token = process.env["POWERX_API_TOKEN"]?.trim();
+  if (!token) throw new Error("POWERX_API_TOKEN must be set before running this script.");
+  return token;
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -37,6 +39,10 @@ interface ChatCompletionResponse {
 
 interface AsyncProcessingResponse {
   status: "processing";
+  poll_url?: string;
+  status_url?: string;
+  result_url?: string;
+  url?: string;
   [key: string]: unknown;
 }
 
@@ -80,7 +86,7 @@ function buildPayload(opts: QueryOptions): ChatPayload {
   };
 }
 
-async function sendRequest(payload: ChatPayload): Promise<ApiResponse> {
+async function sendRequest(payload: ChatPayload): Promise<{ response: ApiResponse; headers: Headers }> {
   const response = await fetch(API_URL, {
     method: "POST",
     headers: {
@@ -93,9 +99,24 @@ async function sendRequest(payload: ChatPayload): Promise<ApiResponse> {
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`HTTP ${response.status} ${response.statusText}: ${body}`);
+    throw new Error(`HTTP ${response.status} ${response.statusText}: ${body.slice(0, 500)}`);
   }
 
+  return { response: (await response.json()) as ApiResponse, headers: response.headers };
+}
+
+function getPollUrl(resp: AsyncProcessingResponse, headers: Headers): string | null {
+  return headers.get("location") ?? resp.poll_url ?? resp.status_url ?? resp.result_url ?? resp.url ?? null;
+}
+
+async function getPollResult(url: string): Promise<ApiResponse> {
+  const parsed = new URL(url, API_URL);
+  const configured = new URL(API_URL);
+  if (parsed.origin !== configured.origin) throw new Error("PowerX returned an unexpected polling origin.");
+  const response = await fetch(parsed, {
+    headers: { Accept: "application/json", Authorization: `Bearer ${getToken()}` },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}: ${(await response.text()).slice(0, 500)}`);
   return response.json() as Promise<ApiResponse>;
 }
 
@@ -110,33 +131,22 @@ function extractAssistantMessage(resp: ApiResponse): string {
   }
   return content;
 }
-
-// ─── Public API ───────────────────────────────────────────────────────────────
-
-/**
- * Send a request to the powerx-agent model and return the assistant reply.
- */
 export async function queryPowerX(opts: QueryOptions): Promise<string> {
   const payload = buildPayload(opts);
   const deadline = Date.now() + POLL_TIMEOUT_MS;
 
-  while (true) {
-    const resp = await sendRequest(payload);
+  let result = await sendRequest(payload);
 
-    if ("status" in resp && resp.status === "processing") {
-      if (!opts.poll) {
-        // Return whatever provisional message exists, if any.
-        return extractAssistantMessage(resp);
-      }
-      if (Date.now() >= deadline) {
-        throw new Error("Polling timed out waiting for final answer.");
-      }
-      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-      continue;
-    }
-
-    return extractAssistantMessage(resp);
+  while ("status" in result.response && result.response.status === "processing") {
+    if (!opts.poll) return extractAssistantMessage(result.response);
+    const pollUrl = getPollUrl(result.response, result.headers);
+    if (!pollUrl) throw new Error("PowerX returned an asynchronous response without a polling URL.");
+    if (Date.now() >= deadline) throw new Error("Polling timed out waiting for final answer.");
+    await new Promise((resolve) => setTimeout(resolve, Math.min(POLL_INTERVAL_MS, Math.max(0, deadline - Date.now()))));
+    result = { response: await getPollResult(pollUrl), headers: new Headers() };
   }
+
+  return extractAssistantMessage(result.response);
 }
 
 // ─── CLI entry point ──────────────────────────────────────────────────────────

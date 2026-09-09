@@ -52,7 +52,11 @@ export type CredentialStatus =
       keyLast4: string;
       updatedAt: string | null;
     }
-  | { state: "unreadable"; storage: "database"; message: string };
+  | {
+      state: "unreadable" | "configuration_error";
+      storage: "database";
+      message: string;
+    };
 
 // Lazily created pool; null when the optional database is not configured.
 const pool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL }) : null;
@@ -140,14 +144,15 @@ export async function saveCredentials(
   userId: string,
   credentials: Credentials,
 ): Promise<SaveCredentialsResult> {
-  // Make the verified credentials immediately available to this process.
-  memoryCredentials.set(userId, {
-    credentials,
-    updatedAt: new Date().toISOString(),
-    writtenAt: Date.now(),
-  });
-
+  // In production, do not activate credentials until the encrypted database
+  // write has completed successfully. This prevents a failed persistence
+  // request from appearing successful on a warm serverless instance.
   if (!pool) {
+    memoryCredentials.set(userId, {
+      credentials,
+      updatedAt: new Date().toISOString(),
+      writtenAt: Date.now(),
+    });
     logger.warn(
       { userId },
       "Alpaca credentials saved to process memory only — DATABASE_URL is not configured, persistence skipped",
@@ -175,6 +180,11 @@ export async function saveCredentials(
        ON CONFLICT (user_id) DO UPDATE SET encrypted_api_key = $2, encrypted_api_secret = $3, updated_at = NOW()`,
       [userId, stored.encryptedApiKey, stored.encryptedApiSecret],
     );
+    memoryCredentials.set(userId, {
+      credentials,
+      updatedAt: new Date().toISOString(),
+      writtenAt: Date.now(),
+    });
     return { persistedToDatabase: true, activeInMemory: true };
   } catch (error) {
     logger.error({ err: error, userId }, "Failed to persist Alpaca credentials to the database");
@@ -202,7 +212,8 @@ export async function loadCredentials(userId: string): Promise<Credentials | nul
     return inMemory.credentials;
   }
 
-  if (!pool || !canEncrypt()) return inMemory?.credentials ?? null;
+  if (!pool) return inMemory?.credentials ?? null;
+  if (!canEncrypt()) return null;
 
   try {
     const record = await fetchStoredRow(userId);
@@ -234,7 +245,16 @@ export async function loadCredentials(userId: string): Promise<Credentials | nul
 export async function getCredentialStatus(userId: string): Promise<CredentialStatus> {
   const inMemory = memoryCredentials.get(userId);
 
-  if (pool && canEncrypt()) {
+  if (pool) {
+    if (!canEncrypt()) {
+      return {
+        state: "configuration_error",
+        storage: "database",
+        message:
+          "Credential persistence is configured with DATABASE_URL, but CREDENTIALS_ENCRYPTION_KEY is missing or invalid. Set a stable 32-byte key on the API deployment, then re-enter your Alpaca keys.",
+      };
+    }
+
     try {
       const record = await fetchStoredRow(userId);
       if (record) {
@@ -272,7 +292,7 @@ export async function getCredentialStatus(userId: string): Promise<CredentialSta
     }
   }
 
-  if (inMemory) {
+  if (inMemory && !pool) {
     return { state: "memory", storage: "memory" };
   }
   return { state: "none", storage: null };
@@ -284,7 +304,7 @@ export async function getCredentialStatus(userId: string): Promise<CredentialSta
 export async function deleteCredentials(userId: string): Promise<{ deletedFromDatabase: boolean }> {
   memoryCredentials.delete(userId);
 
-  if (!pool || !canEncrypt()) {
+  if (!pool) {
     return { deletedFromDatabase: false };
   }
 

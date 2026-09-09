@@ -485,7 +485,7 @@ router.get("/agent/market/:symbol", async (req, res): Promise<void> => {
 router.post("/agent/powerx", async (req, res): Promise<void> => {
   const text = typeof req.body?.text === "string" ? req.body.text.trim() : undefined;
   const mimeType = typeof req.body?.mimeType === "string" ? req.body.mimeType.trim() : undefined;
-  const poll = req.body?.poll === true;
+  const poll = req.body?.poll !== false;
   const agentContext = req.body?.agentContext && typeof req.body.agentContext === "object" ? req.body.agentContext : undefined;
 
   let fileBytes: Buffer | undefined;

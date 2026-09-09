@@ -13,7 +13,7 @@ type CredentialStatus =
   | { state: 'none'; storage: null }
   | { state: 'memory'; storage: 'memory' }
   | { state: 'database'; storage: 'database'; keyLast4: string; updatedAt: string | null }
-  | { state: 'unreadable'; storage: 'database'; message: string };
+  | { state: 'unreadable' | 'configuration_error'; storage: 'database'; message: string };
 
 function describeStatus(status: CredentialStatus): { kind: 'none' | 'ok' | 'problem'; title: string; detail: string } {
   switch (status.state) {
@@ -28,6 +28,12 @@ function describeStatus(status: CredentialStatus): { kind: 'none' | 'ok' | 'prob
         kind: 'problem',
         title: 'Credentials active for this session only',
         detail: 'The API has no database configured, so keys are stored in server memory and will not survive a redeploy or restart.',
+      };
+    case 'configuration_error':
+      return {
+        kind: 'problem',
+        title: 'Credential persistence is not configured',
+        detail: status.message || 'Set CREDENTIALS_ENCRYPTION_KEY on the API deployment, then save your keys again.',
       };
     case 'unreadable':
       return {

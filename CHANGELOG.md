@@ -4,6 +4,78 @@ All completed work is recorded here after every prompt request.
 
 ---
 
+## [Session 9] — Frontend↔backend interface audit, PowerX AI hardening, credential persistence safety (CURRENT STATE)
+
+> **Read this first (context for any LLM picking this up):** The app is "Kairo", an Alpaca **paper-only** AI trading agent.
+> Monorepo: `artifacts/api-server` (Express 5 API, Vercel serverless), `artifacts/alpaca-agent` (React/Vite frontend),
+> `lib/api-spec` + `lib/api-zod` + `lib/api-client-react` (OpenAPI → Orval → Zod contract, shared client), `scripts/` (PowerX CLI helper).
+> Deployment = **two separate Vercel projects**: repo root `vercel.json` serves only the API (rewrite `/* → /api/index`, `maxDuration` 60s);
+> `artifacts/alpaca-agent/vercel.json` serves the SPA from `dist/public`.
+
+### 1. What was verified end-to-end (audit result)
+
+**Frontend ↔ Backend interfacing — OK**
+- Frontend bootstraps the generated client in `src/main.tsx`: `setBaseUrl(import.meta.env.VITE_API_URL)` + `setAuthTokenGetter(getToken)` (Clerk JWT), set synchronously before first render to avoid a race where queries fire against the wrong origin.
+- All React Query hooks come from `@workspace/api-client-react` (Orval-generated from `lib/api-spec/openapi.yaml`) and call `/api/agent/*` paths — the contract is shared, so schema drift is caught at compile time on both sides.
+- `ChatPage.tsx` does two direct `fetch` calls outside the generated client, both with Clerk bearer token attached manually: `POST /api/agent/powerx` (AI chat) and `POST /api/agent/trade` (order placement). Both paths exist in `routes/agent.ts`.
+- SSE console: `GET /api/agent/console/stream` sets **explicit** CORS headers inside the route handler (Vercel edge does not reliably propagate `cors()` middleware headers on streaming responses) plus an `OPTIONS` preflight handler using the same `isOriginAllowed` allowlist from `lib/cors.ts` (env-driven via `CORS_ORIGINS`/`CORS_ORIGIN`).
+- Auth gate in `app.ts`: `ALLOW_LOCAL_DEV_AUTH=true` bypasses Clerk (local dev only) otherwise `clerkMiddleware()`; 401 without userId; `/agent/credentials` resolves its own userId, everything else flows through `withUserCredentials(userId)` which loads creds (Postgres AES-256-GCM → 30s memory cache → demo fallback) and binds them via AsyncLocalStorage.
+
+**AI chat (PowerX) — OK, hardened this session**
+- `POST /api/agent/powerx` is a **server-side proxy**: `POWERX_API_TOKEN` never reaches the browser.
+- `lib/powerx.ts` was rewritten this session: default endpoint moved from `https://minis-yzdb.onrender.com/v1/chat/completions` to `https://http--powerx-app--cmttpj77q5vc.code.run/v1`; URL/model/timeouts now env-driven (`POWERX_API_URL`, `POWERX_MODEL`, `POWERX_REQUEST_TIMEOUT_MS`, `POWERX_POLL_INTERVAL_MS`, `POWERX_POLL_TIMEOUT_MS`).
+- Every outbound call has an `AbortController` timeout (15s default). Polling: async responses are detected by `status: processing|queued|pending|in_progress`; the poll URL is taken from `Location` header or `poll_url`/`status_url`/`result_url`/`url` body fields and is **origin-pinned to the configured PowerX origin (SSRF guard)**; poll loop has its own deadline (30s default). `poll` now defaults to **true** server-side (`req.body?.poll !== false`).
+- Response parsing is defensive: OpenAI `choices[].message.content` (string or content-parts array), plus `result`/`response`/`data` nesting, plus top-level `content`. "Service suspended" responses produce an actionable error message.
+- Chat personality: when `agentContext` is provided, a system prompt injects live Kairo state (mode, equity, cash, open positions, running/symbols/lastRunAt) so the AI answers from real account data. Frontend `ChatPage` has a deterministic local intent parser (portfolio, status, buy/sell with order confirmation flow, strategy explainers) and only falls back to PowerX for unknown intents.
+
+**Alpaca paper trading + ETFs/stocks + historical data — OK**
+- `PAPER_TRADING_URL = https://paper-api.alpaca.markets` is hardcoded (reference: https://docs.alpaca.markets/us/docs/paper-trading). `getStatus()` includes `paperUrlValid` guard. **No live-trading path exists — keep it that way** (standing rule from Session 2).
+- Orders go to `POST /v2/orders` with a `client_order_id`; a 60s-TTL idempotency map rejects duplicate submissions; kill-switch `POST /agent/flatten` closes everything.
+- Asset universe: `GET /v2/assets?status=active&tradable=true&asset_class=us_equity` — covers **ETFs and stocks** (default demo universe `SPY, QQQ, IWM, AAPL` — three ETFs + one stock; frontend asset search hits this endpoint).
+- Market data (reference: https://docs.alpaca.markets/us/docs/getting-started-with-alpaca-market-data): `GET https://data.alpaca.markets/v2/stocks/{symbol}/bars` with `feed=iex` (free plan compatible), timeframes, 60 latest bars for live scanning; `fetchHistoricalBars()` (start/end, limit 1000) powers backtests (`/agent/backtest`) and the 72-candidate grid optimizer (`/agent/optimize`, 50s deadline). Without credentials everything runs on deterministic synthetic sine-wave demo data.
+- Strategy engines: Z-score mean-reversion (entry |Z|≥2σ, ADX<25, volume≥1×, invalidation 3.5σ, 2% trailing stop) and ICT/HMM 5-cluster mode. All decisions logged to activity feed + audit trail.
+
+### 2. Changes made this session (uncommitted at time of writing)
+- `api/index.ts`, `api/agent/[...path].ts` — fixed broken relative import: re-exports were pointing at `../../artifacts/api-server/dist/vercel.mjs` from a file that lives one level deep; corrected to `../artifacts/api-server/dist/vercel.mjs`. This was breaking the Vercel API deploy.
+- `artifacts/api-server/src/lib/credentials.ts` — **persistence is now fail-closed**: when `DATABASE_URL` is configured, credentials are NOT activated in memory until the encrypted DB write succeeds (previously a failed persistence looked successful on warm serverless instances and keys silently vanished on next instance). New `configuration_error` tri-state: `DATABASE_URL` set but `CREDENTIALS_ENCRYPTION_KEY` missing/invalid → status reports the misconfiguration instead of pretending demo mode; `loadCredentials` returns null (demo data) in that case. `memory` state is only reported when no DB is configured.
+- `artifacts/api-server/src/lib/powerx.ts` — full rewrite as described above (new endpoint, env-driven config, timeouts, SSRF-guarded polling, defensive parsing, actionable errors).
+- `artifacts/api-server/src/routes/agent.ts` — PowerX route: polling enabled by default.
+- `artifacts/alpaca-agent/src/pages/CredentialsPage.tsx` — handles the new `configuration_error` status with an explanatory banner (set `CREDENTIALS_ENCRYPTION_KEY`, re-enter keys).
+- `scripts/src/query-powerx.ts` — CLI helper ported to match the new client behavior.
+- `artifacts/api-server/src/lib/powerx.test.ts` — **new test file** (4 cases: sync content, poll flow without repeating POST, rejection of async-without-poll-URL, no request without token).
+
+### 3. Validation performed this session (all green)
+- `node --test` in `artifacts/api-server`: **20/20 unit tests pass** (crypto round-trip/rotation, credential isolation/persistence, PowerX polling/no-token, per-user runtime scoping).
+- `pnpm typecheck` (api-server, `tsc --noEmit`): clean.
+- `pnpm build` (alpaca-agent, Vite): clean, 2246 modules (chunk-size warning only, non-blocking).
+- `pnpm build` (api-server): clean; `dist/vercel.mjs` produced, which `api/index.ts` and `api/agent/[...path].ts` re-export.
+- `.env.local` confirmed gitignored.
+
+### 4. Known gaps / recommended next steps (ranked — from full backend audit)
+1. **HIGH — automation cannot survive Vercel serverless**: `POST /agent/start` loops via in-process `setTimeout` + in-memory state; Lambda freeze/instance switch kills it. Needs a durable scheduler (Vercel Cron + a `/agent/tick` endpoint, or QStash/queue, or a long-running host) + Postgres-backed automation state.
+2. **HIGH — serverless Postgres pooling**: module-scope `new Pool()` (default max:10) per instance can exhaust DB connections under Vercel concurrency. Use a pooled/pgBouncer endpoint with `max:1` or a serverless driver (Neon HTTP).
+3. **HIGH — `ALLOW_LOCAL_DEV_AUTH` has no production guard**: if that env var is ever set on the API deployment, every request authenticates as `local-dev-user`. Add: refuse when `NODE_ENV === "production"`.
+4. **MEDIUM — no rate limiting** on expensive endpoints (`/agent/optimize` ≈72 backtests, `/agent/powerx` paid AI calls). Add per-user throttling (e.g. Upstash Redis).
+5. **MEDIUM — no outbound timeouts on Alpaca `fetch` calls** (PowerX now has them; Alpaca does not). Also `credentialsWork()` fires a live `/v2/account` call on every `/agent/status` — add a short TTL cache.
+6. **MEDIUM — global idempotency map not user-scoped**: `recentIdempotencyKeys` is module-level keyed by raw key; key it `${userId}:${key}`.
+7. **MEDIUM — error messages leak internals** (raw Alpaca response bodies in 500/502 payloads). Log details, return generic messages.
+8. **MEDIUM — `/agent/powerx` upload limits**: `express.json()` default 100KB silently caps base64 files; set explicit limit + MIME allowlist.
+9. **LOW** — side-effecting GETs (`snapshotFromBars` mutates `trailingExtremes` by hidden default); artificial ~410ms of `setTimeout` delays in the SSE pipeline; dead `routes/index.ts` + empty `middlewarew/`; `/agent/credentials` POST not Zod-validated like other routes; DDL duplicated between `credentials.ts` and Drizzle schema; no route-level/integration tests.
+
+### 5. Environment variables (API deployment, as of this session)
+| Var | Required | Purpose |
+|---|---|---|
+| `CLERK_SECRET_KEY` / publishable key on frontend | yes (prod) | Auth |
+| `DATABASE_URL` | for persistence | Postgres for encrypted credentials |
+| `CREDENTIALS_ENCRYPTION_KEY` | with DATABASE_URL | 32-byte key (64 hex chars or base64), AES-256-GCM. Rotating it marks rows `unreadable` |
+| `ALPACA_API_KEY` / `ALPACA_API_SECRET` | optional env fallback | Per-user keys from Credentials page take priority |
+| `POWERX_API_TOKEN` | for AI chat | Server-side only |
+| `POWERX_API_URL`, `POWERX_MODEL`, `POWERX_*_TIMEOUT_MS`, `POWERX_POLL_*` | optional | Override PowerX defaults |
+| `CORS_ORIGINS` / `CORS_ORIGIN` | recommended | Comma-separated frontend origin allowlist |
+| `ALLOW_LOCAL_DEV_AUTH` | local dev only | ⚠️ must NEVER be set in production (gap #3) |
+
+---
+
 ## [Session 8] — Per-user agent state, credential tri-state + status/delete, env-driven CORS
 
 ### Completed
