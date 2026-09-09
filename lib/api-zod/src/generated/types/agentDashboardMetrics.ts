@@ -13,4 +13,8 @@ export type AgentDashboardMetrics = {
   openPositions: number;
   winRate: number;
   avgHoldHours: number;
+  /** Number of filled paper trades the win-rate math is based on. 0 means no realized history yet. */
+  realizedTradeCount: number;
+  /** Explanation when winRate/avgHoldHours cannot be computed from real history. */
+  note?: string | null;
 };

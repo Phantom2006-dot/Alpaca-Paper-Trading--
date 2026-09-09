@@ -20,6 +20,7 @@ import {
   getDashboard,
   getMarketSnapshot,
   getStatus,
+  getTradeSuggestions,
   optimizeBacktest,
   placeManualTrade,
   runBacktest,
@@ -479,6 +480,15 @@ router.get("/agent/market/:symbol", async (req, res): Promise<void> => {
   } catch (error) {
     req.log.error({ err: error }, "Market snapshot failed");
     res.status(502).json({ error: error instanceof Error ? error.message : "Market snapshot failed" });
+  }
+});
+
+router.get("/agent/suggestions", async (req, res): Promise<void> => {
+  try {
+    res.json(await getTradeSuggestions("zscore"));
+  } catch (error) {
+    req.log.error({ err: error }, "Trade suggestions failed");
+    res.status(502).json({ error: error instanceof Error ? error.message : "Trade suggestions failed" });
   }
 });
 

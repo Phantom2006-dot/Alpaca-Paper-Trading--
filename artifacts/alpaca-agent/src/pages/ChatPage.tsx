@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '@clerk/react';
 import {
-  useGetAgentAccount, useGetAgentStatus,
-  getGetAgentAccountQueryKey, getGetAgentStatusQueryKey,
+  useGetAgentAccount, useGetAgentStatus, useGetTradeSuggestions,
+  getGetAgentAccountQueryKey, getGetAgentStatusQueryKey, getGetTradeSuggestionsQueryKey,
 } from '@workspace/api-client-react';
-import type { AgentStatus, AgentAccountOverview } from '@workspace/api-client-react';
+import type { AgentStatus, AgentAccountOverview, TradeSuggestion } from '@workspace/api-client-react';
 import { Send, Bot, User, RefreshCw, TrendingUp, TrendingDown, ShoppingCart, AlertTriangle, Check } from 'lucide-react';
 
 function cx(...c: Array<string | false | null | undefined>) {
@@ -34,6 +34,7 @@ type Intent =
   | { type: 'sell'; symbol: string; qty: number; orderType: 'market' | 'limit'; limitPrice?: number }
   | { type: 'portfolio' }
   | { type: 'status' }
+  | { type: 'advice' }
   | { type: 'explain_strategy' }
   | { type: 'explain_demo' }
   | { type: 'explain_agent' }
@@ -61,6 +62,7 @@ function parseIntent(text: string): Intent {
 
   if (/portfolio|positions?|holdings?|account|balance|equity|cash/.test(t)) return { type: 'portfolio' };
   if (/status|running|agent state|automation|scanning|next run|last run/.test(t)) return { type: 'status' };
+  if (/what.*(trade|buy|sell|should)|suggest|safest|advice|recommend|opportunit|idea|watchlist|good trade/.test(t)) return { type: 'advice' };
   if (/demo mode|demo|simulation|no credentials|without key|without alpaca/.test(t)) return { type: 'explain_demo' };
   if (/how.*agent.*work|what.*agent do|agent.*trade|start agent|scanning.*work|what.*scanning/.test(t)) return { type: 'explain_agent' };
   if (/z.?score|mean.?reversion|sma|standard deviation/.test(t)) return { type: 'explain_zscore' };
@@ -158,6 +160,19 @@ function buildAgentReply(
   }
 }
 
+function formatSuggestion(s: TradeSuggestion, index: number): string {
+  const gradeEmoji = s.safetyGrade === 'A' ? '🟢' : s.safetyGrade === 'B' ? '🟡' : '🟠';
+  const lines = [
+    `${gradeEmoji} **${index + 1}. ${s.action} ${s.symbol}** — ${s.side.toUpperCase()} · Safety ${s.safetyScore}/100 (grade ${s.safetyGrade})`,
+    `   • Price $${s.price.toFixed(2)} · Z ${s.zScore.toFixed(2)}σ · ADX ${s.adx.toFixed(1)} · Volume ${s.volumeRatio.toFixed(2)}×`,
+    `   • Suggested size: ${s.proposedQty} shares (${s.maxPositionPct}% of equity max)`,
+    `   • Stop loss $${s.stopLoss.toFixed(2)} · Target (mean) $${s.takeProfit.toFixed(2)}`,
+  ];
+  for (const r of s.rationale.slice(0, 3)) lines.push(`   • ${r}`);
+  for (const w of s.warnings.slice(0, 2)) lines.push(`   • ⚠️ ${w}`);
+  return lines.join('\n');
+}
+
 // ── Chat bubble ───────────────────────────────────────────────────────────────
 
 function Bubble({ msg, onConfirmOrder, onCancelOrder, confirming }: {
@@ -245,6 +260,7 @@ function Bubble({ msg, onConfirmOrder, onCancelOrder, confirming }: {
 const SUGGESTIONS = [
   'Show my portfolio',
   'Is the agent running?',
+  'What trades do you suggest?',
   'Buy 5 SPY',
   'How does Z-score work?',
   'What is demo mode?',
@@ -256,6 +272,7 @@ export function ChatPage() {
   const { getToken } = useAuth();
   const accountQuery = useGetAgentAccount({ query: { queryKey: getGetAgentAccountQueryKey(), staleTime: 15000 } });
   const statusQuery = useGetAgentStatus({ query: { queryKey: getGetAgentStatusQueryKey(), staleTime: 15000 } });
+  const suggestionsQuery = useGetTradeSuggestions({ query: { queryKey: getGetTradeSuggestionsQueryKey(), staleTime: 60_000, enabled: false } });
 
   const [messages, setMessages] = useState<Msg[]>([{
     id: 'welcome',
@@ -287,6 +304,29 @@ export function ChatPage() {
     addMsg({ role: 'user', ts: new Date(), text: trimmed });
 
     const intent = parseIntent(trimmed);
+    if (intent.type === 'advice') {
+      // Ranked safest-trade suggestions from the live strategy scan (no LLM needed).
+      setThinking(true);
+      addMsg({ role: 'agent', ts: new Date(), text: 'Scanning the market and scoring every setup against the six guardrails…' });
+      suggestionsQuery.refetch().then(({ data }) => {
+        setThinking(false);
+        if (!data || data.suggestions.length === 0) {
+          addMsg({
+            role: 'agent',
+            ts: new Date(),
+            text: `**No qualifying setups right now.**\n\nI scanned ${data?.scannedSymbols.join(', ') ?? 'the universe'} and none of them pass all six guardrails simultaneously. That is a normal, healthy outcome — forcing trades when the market is trending or quiet is how accounts bleed.\n\nAsk me again later, or say "explain guardrails" to see what a setup must pass.`,
+          });
+          return;
+        }
+        const header = `**${data.candidates} setup${data.candidates === 1 ? '' : 's'} passed all guardrails — ranked safest-first:**\n`;
+        const body = data.suggestions.map((s, i) => formatSuggestion(s, i)).join('\n\n');
+        addMsg({ role: 'agent', ts: new Date(), text: `${header}\n${body}\n\n_${data.disclaimer}_\n\nTo act on one: say e.g. "${data.suggestions[0].action === 'BUY' ? 'buy' : 'sell'} ${data.suggestions[0].proposedQty} ${data.suggestions[0].symbol}".` });
+      }).catch(() => {
+        setThinking(false);
+        addMsg({ role: 'agent', ts: new Date(), text: "I couldn't complete the safety scan right now. Try again in a moment.", error: true });
+      });
+      return;
+    }
     if (intent.type === 'unknown') {
       // Fall through to PowerX with live context
       setThinking(true);

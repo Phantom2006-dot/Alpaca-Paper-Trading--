@@ -92,7 +92,9 @@ export const GetAgentDashboardResponse = zod.object({
   "blockedToday": zod.number(),
   "openPositions": zod.number(),
   "winRate": zod.number(),
-  "avgHoldHours": zod.number()
+  "avgHoldHours": zod.number(),
+  "realizedTradeCount": zod.number().describe('Number of filled paper trades the win-rate math is based on. 0 means no realized history yet.'),
+  "note": zod.string().nullish().describe('Explanation when winRate\/avgHoldHours cannot be computed from real history.')
 })
 })
 
@@ -443,6 +445,39 @@ export const QueryPowerXBody = zod.object({
 
 export const QueryPowerXResponse = zod.object({
   "reply": zod.string()
+})
+
+
+/**
+ * Runs the current strategy over the default symbol universe and returns only candidates that pass every deterministic guardrail, ranked by a conservative safety score. Educational analysis only — no orders are placed and nothing is stored.
+ * @summary Ranked safest-trade suggestions from the live strategy scan
+ */
+export const GetTradeSuggestionsResponse = zod.object({
+  "mode": zod.enum(['paper', 'demo']),
+  "strategyMode": zod.enum(['zscore', 'ict_hmm']),
+  "scannedSymbols": zod.array(zod.string()),
+  "candidates": zod.number(),
+  "suggestions": zod.array(zod.object({
+  "symbol": zod.string(),
+  "side": zod.enum(['long', 'short']),
+  "action": zod.enum(['BUY', 'SELL']),
+  "price": zod.number(),
+  "zScore": zod.number(),
+  "adx": zod.number(),
+  "volumeRatio": zod.number(),
+  "safetyScore": zod.number(),
+  "safetyGrade": zod.enum(['A', 'B', 'C']),
+  "rationale": zod.array(zod.string()),
+  "warnings": zod.array(zod.string()),
+  "proposedQty": zod.number(),
+  "stopLoss": zod.number(),
+  "takeProfit": zod.number(),
+  "maxPositionPct": zod.number(),
+  "regime": zod.string().nullish(),
+  "cluster": zod.string().nullish()
+})),
+  "disclaimer": zod.string(),
+  "ranAt": zod.string()
 })
 
 

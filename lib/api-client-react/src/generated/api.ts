@@ -40,7 +40,8 @@ import type {
   RunStrategyInput,
   StrategyRunResult,
   SymbolSnapshot,
-  TradableAsset
+  TradableAsset,
+  TradeSuggestions
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -1045,6 +1046,84 @@ export const useQueryPowerX = <TError = ErrorType<ErrorResponse>,
       > => {
       return useMutation(getQueryPowerXMutationOptions(options));
     }
+
+export const getGetTradeSuggestionsUrl = () => {
+
+
+
+
+  return `/api/agent/suggestions`
+}
+
+/**
+ * Runs the current strategy over the default symbol universe and returns only candidates that pass every deterministic guardrail, ranked by a conservative safety score. Educational analysis only — no orders are placed and nothing is stored.
+ * @summary Ranked safest-trade suggestions from the live strategy scan
+ */
+export const getTradeSuggestions = async ( options?: Parameters<typeof customFetch>[1]): Promise<TradeSuggestions> => {
+
+  return customFetch<TradeSuggestions>(getGetTradeSuggestionsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTradeSuggestionsQueryKey = () => {
+    return [
+    `/api/agent/suggestions`
+    ] as const;
+    }
+
+
+export const getGetTradeSuggestionsQueryOptions = <TData = Awaited<ReturnType<typeof getTradeSuggestions>>, TError = ErrorType<ErrorResponse>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTradeSuggestions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTradeSuggestionsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTradeSuggestions>>> = ({ signal }) => getTradeSuggestions({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTradeSuggestions>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetTradeSuggestionsQueryResult = NonNullable<Awaited<ReturnType<typeof getTradeSuggestions>>>
+export type GetTradeSuggestionsQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Ranked safest-trade suggestions from the live strategy scan
+ */
+
+export function useGetTradeSuggestions<TData = Awaited<ReturnType<typeof getTradeSuggestions>>, TError = ErrorType<ErrorResponse>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTradeSuggestions>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetTradeSuggestionsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getOptimizeBacktestUrl = () => {
 

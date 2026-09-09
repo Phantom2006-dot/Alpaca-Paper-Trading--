@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { loadCredentials } from "./credentials";
+import { logger } from "./logger";
 
 import type { Logger } from "pino";
 
@@ -1093,6 +1094,7 @@ export async function getDashboard(log: Logger) {
     }),
   );
   const status = await getStatus();
+  const realized = await getRealizedMetrics();
   return GetAgentDashboardResponse.parse({
     status,
     account,
@@ -1103,10 +1105,227 @@ export async function getDashboard(log: Logger) {
       signalsToday: state.signalsToday,
       blockedToday: state.blockedToday,
       openPositions: positions.length,
-      winRate: 68.4,
-      avgHoldHours: 6.2,
+      winRate: realized.winRate,
+      avgHoldHours: realized.avgHoldHours,
+      realizedTradeCount: realized.tradeCount,
+      note: realized.note,
     },
   });
+}
+
+/**
+ * Real win-rate / average-hold metrics computed from the account's actual
+ * closed paper orders on Alpaca (filled buy+sell pairs per symbol, FIFO).
+ * No placeholder numbers: when there is no realized history the callers get
+ * zeros plus an explanatory note instead of invented values.
+ */
+async function getRealizedMetrics(): Promise<{
+  winRate: number;
+  avgHoldHours: number;
+  tradeCount: number;
+  note: string | null;
+}> {
+  if (!hasCredentials()) {
+    return {
+      winRate: 0,
+      avgHoldHours: 0,
+      tradeCount: 0,
+      note: "Demo mode — no real Alpaca order history to compute win rate from.",
+    };
+  }
+  try {
+    const orders = await alpacaRequest<
+      Array<{
+        symbol: string;
+        side: string;
+        qty: string;
+        filled_qty: string;
+        filled_avg_price?: string | null;
+        status: string;
+        submitted_at?: string;
+        filled_at?: string | null;
+      }>
+    >("/v2/orders?status=closed&limit=500&direction=desc");
+
+    type Fill = { side: "buy" | "sell"; qty: number; price: number; at: number };
+    const fillsBySymbol = new Map<string, Fill[]>();
+    for (const order of orders) {
+      const qty = toNumber(order.filled_qty);
+      const price = toNumber(order.filled_avg_price, 0);
+      if (order.status !== "filled" || qty <= 0 || price <= 0) continue;
+      if (order.side !== "buy" && order.side !== "sell") continue;
+      const at = Date.parse(order.filled_at ?? order.submitted_at ?? "");
+      if (!Number.isFinite(at)) continue;
+      const list = fillsBySymbol.get(order.symbol) ?? [];
+      list.push({ side: order.side, qty, price, at });
+      fillsBySymbol.set(order.symbol, list);
+    }
+
+    // FIFO round-trips: each sell closes the oldest open buy lot (long view).
+    let wins = 0;
+    let losses = 0;
+    let holdHoursTotal = 0;
+    for (const fills of fillsBySymbol.values()) {
+      const chronological = [...fills].sort((a, b) => a.at - b.at);
+      const openLots: Array<{ qty: number; price: number; at: number }> = [];
+      for (const fill of chronological) {
+        if (fill.side === "buy") {
+          openLots.push({ qty: fill.qty, price: fill.price, at: fill.at });
+          continue;
+        }
+        let remaining = fill.qty;
+        while (remaining > 0 && openLots.length) {
+          const lot = openLots[0];
+          const matched = Math.min(lot.qty, remaining);
+          const pnl = (fill.price - lot.price) * matched;
+          if (pnl > 0) wins += 1;
+          else losses += 1;
+          holdHoursTotal += (fill.at - lot.at) / 3_600_000;
+          lot.qty -= matched;
+          remaining -= matched;
+          if (lot.qty <= 0) openLots.shift();
+        }
+      }
+    }
+
+    const tradeCount = wins + losses;
+    if (tradeCount === 0) {
+      return {
+        winRate: 0,
+        avgHoldHours: 0,
+        tradeCount: 0,
+        note: "No closed round-trip trades yet — win rate fills in after your first completed paper trade.",
+      };
+    }
+    return {
+      winRate: (wins / tradeCount) * 100,
+      avgHoldHours: holdHoursTotal / tradeCount,
+      tradeCount,
+      note: null,
+    };
+  } catch (error) {
+    logger.warn({ err: error }, "Unable to compute realized metrics from Alpaca order history");
+    return {
+      winRate: 0,
+      avgHoldHours: 0,
+      tradeCount: 0,
+      note: "Order history is temporarily unavailable — win rate will refresh automatically.",
+    };
+  }
+}
+
+/**
+ * Ranked "safest trades right now": runs the live strategy over the default
+ * universe and returns only candidates that pass every deterministic
+ * guardrail, scored conservatively. Educational analysis only — no orders are
+ * placed and nothing is stored.
+ */
+export async function getTradeSuggestions(strategyMode: StrategyMode = "zscore") {
+  const [account, positions] = await Promise.all([fetchAccount(), fetchPositions()]);
+  const snapshots = await Promise.all(
+    DEFAULT_SYMBOLS.map(async (symbol) => {
+      const bars = await fetchBars(symbol);
+      return snapshotFromBars(symbol, bars, positionFor(positions, symbol));
+    }),
+  );
+
+  const scored = snapshots
+    .filter(
+      (snapshot): snapshot is typeof snapshot & { signal: "long_entry" | "short_entry" } =>
+        snapshot.signal === "long_entry" || snapshot.signal === "short_entry",
+    )
+    .filter((snapshot) => !positionFor(positions, snapshot.symbol))
+    .map((snapshot) => {
+      const rationale: string[] = [];
+      const warnings: string[] = [];
+      let score = 0;
+
+      const zExcess = Math.abs(snapshot.zScore) - guardrails.entryZ;
+      if (zExcess >= 1) {
+        score += 25;
+        rationale.push(`Z-score ${snapshot.zScore.toFixed(2)}σ is far beyond the ±${guardrails.entryZ}σ entry threshold.`);
+      } else if (zExcess >= 0.5) {
+        score += 15;
+        rationale.push(`Z-score ${snapshot.zScore.toFixed(2)}σ clears the ±${guardrails.entryZ}σ entry threshold with margin.`);
+      } else {
+        score += 8;
+        rationale.push(`Z-score ${snapshot.zScore.toFixed(2)}σ just meets the ±${guardrails.entryZ}σ entry threshold.`);
+        warnings.push("Entry signal is marginal — the deviation barely crosses the threshold.");
+      }
+
+      if (snapshot.adx <= guardrails.adxMax * 0.6) {
+        score += 25;
+        rationale.push(`ADX ${snapshot.adx.toFixed(1)} confirms a strongly non-trending regime — ideal for mean reversion.`);
+      } else if (snapshot.adx <= guardrails.adxMax) {
+        score += 15;
+        rationale.push(`ADX ${snapshot.adx.toFixed(1)} is below the ${guardrails.adxMax} trend gate.`);
+      }
+
+      if (snapshot.volumeRatio >= guardrails.minVolumeRatio * 1.5) {
+        score += 20;
+        rationale.push(`Volume at ${snapshot.volumeRatio.toFixed(2)}× average strongly confirms the move.`);
+      } else if (snapshot.volumeRatio >= guardrails.minVolumeRatio) {
+        score += 12;
+        rationale.push(`Volume at ${snapshot.volumeRatio.toFixed(2)}× average meets the confirmation gate.`);
+      } else {
+        warnings.push("Volume confirmation is weak.");
+      }
+
+      const roomToMean = Math.abs(snapshot.price - snapshot.sma) / Math.max(snapshot.sma, 1e-9);
+      if (roomToMean >= 0.02) {
+        score += 15;
+        rationale.push(`Price sits ${ (roomToMean * 100).toFixed(2)}% from its 20-bar mean, leaving room for reversion before equilibrium.`);
+      } else {
+        warnings.push("Price is already close to the mean — limited reversion profit potential remains.");
+      }
+
+      const invalidationGap = guardrails.invalidationZ - Math.abs(snapshot.zScore);
+      if (invalidationGap >= 1) {
+        score += 15;
+        rationale.push(`Hard-invalidation buffer is wide (|Z| is ${invalidationGap.toFixed(1)}σ below the ${guardrails.invalidationZ}σ limit).`);
+      } else if (invalidationGap < 0.5) {
+        warnings.push("Close to the 3.5σ hard-invalidation line — thesis dies quickly if the move extends.");
+      }
+
+      const side = snapshot.signal === "long_entry" ? "long" : "short";
+      const positionUsd = account.equity * (guardrails.maxPositionPct / 100);
+      const proposedQty = Math.max(1, Math.floor(positionUsd / snapshot.price));
+      const stopLoss = side === "long" ? snapshot.price * 0.98 : snapshot.price * 1.02;
+      const takeProfit = snapshot.sma;
+      const safetyGrade = score >= 75 ? ("A" as const) : score >= 55 ? ("B" as const) : ("C" as const);
+
+      return {
+        symbol: snapshot.symbol,
+        side,
+        action: side === "long" ? ("BUY" as const) : ("SELL" as const),
+        price: snapshot.price,
+        zScore: snapshot.zScore,
+        adx: snapshot.adx,
+        volumeRatio: snapshot.volumeRatio,
+        safetyScore: Math.min(100, score),
+        safetyGrade,
+        rationale,
+        warnings,
+        proposedQty,
+        stopLoss,
+        takeProfit,
+        maxPositionPct: guardrails.maxPositionPct,
+        regime: snapshot.regime ?? null,
+        cluster: snapshot.cluster ?? null,
+      };
+    })
+    .sort((a, b) => b.safetyScore - a.safetyScore);
+
+  return {
+    mode: mode(),
+    strategyMode,
+    scannedSymbols: DEFAULT_SYMBOLS,
+    candidates: scored.length,
+    suggestions: scored.slice(0, 5),
+    disclaimer:
+      "Educational analysis from deterministic rules on live Alpaca market data. Not financial advice. Paper trading only — no real money. Every trade remains subject to all six guardrails at execution time.",
+    ranAt: new Date().toISOString(),
+  };
 }
 
 export async function runStrategy(

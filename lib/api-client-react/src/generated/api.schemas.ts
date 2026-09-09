@@ -411,6 +411,10 @@ export type AgentDashboardMetrics = {
   openPositions: number;
   winRate: number;
   avgHoldHours: number;
+  /** Number of filled paper trades the win-rate math is based on. 0 means no realized history yet. */
+  realizedTradeCount: number;
+  /** Explanation when winRate/avgHoldHours cannot be computed from real history. */
+  note?: string | null;
 };
 
 export interface AgentDashboard {
@@ -419,6 +423,77 @@ export interface AgentDashboard {
   snapshots: SymbolSnapshot[];
   activity: StrategyActivity[];
   metrics: AgentDashboardMetrics;
+}
+
+export type TradeSuggestionSide = typeof TradeSuggestionSide[keyof typeof TradeSuggestionSide];
+
+
+export const TradeSuggestionSide = {
+  long: 'long',
+  short: 'short',
+} as const;
+
+export type TradeSuggestionAction = typeof TradeSuggestionAction[keyof typeof TradeSuggestionAction];
+
+
+export const TradeSuggestionAction = {
+  BUY: 'BUY',
+  SELL: 'SELL',
+} as const;
+
+export type TradeSuggestionSafetyGrade = typeof TradeSuggestionSafetyGrade[keyof typeof TradeSuggestionSafetyGrade];
+
+
+export const TradeSuggestionSafetyGrade = {
+  A: 'A',
+  B: 'B',
+  C: 'C',
+} as const;
+
+export interface TradeSuggestion {
+  symbol: string;
+  side: TradeSuggestionSide;
+  action: TradeSuggestionAction;
+  price: number;
+  zScore: number;
+  adx: number;
+  volumeRatio: number;
+  safetyScore: number;
+  safetyGrade: TradeSuggestionSafetyGrade;
+  rationale: string[];
+  warnings: string[];
+  proposedQty: number;
+  stopLoss: number;
+  takeProfit: number;
+  maxPositionPct: number;
+  regime?: string | null;
+  cluster?: string | null;
+}
+
+export type TradeSuggestionsMode = typeof TradeSuggestionsMode[keyof typeof TradeSuggestionsMode];
+
+
+export const TradeSuggestionsMode = {
+  paper: 'paper',
+  demo: 'demo',
+} as const;
+
+export type TradeSuggestionsStrategyMode = typeof TradeSuggestionsStrategyMode[keyof typeof TradeSuggestionsStrategyMode];
+
+
+export const TradeSuggestionsStrategyMode = {
+  zscore: 'zscore',
+  ict_hmm: 'ict_hmm',
+} as const;
+
+export interface TradeSuggestions {
+  mode: TradeSuggestionsMode;
+  strategyMode: TradeSuggestionsStrategyMode;
+  scannedSymbols: string[];
+  candidates: number;
+  suggestions: TradeSuggestion[];
+  disclaimer: string;
+  ranAt: string;
 }
 
 export type RunStrategyInputStrategyMode = typeof RunStrategyInputStrategyMode[keyof typeof RunStrategyInputStrategyMode];

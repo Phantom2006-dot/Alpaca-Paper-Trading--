@@ -290,6 +290,29 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /agent/suggestions:
+    get:
+      operationId: getTradeSuggestions
+      tags: [agent]
+      summary: Ranked safest-trade suggestions from the live strategy scan
+      description: >-
+        Runs the current strategy over the default symbol universe and returns
+        only candidates that pass every deterministic guardrail, ranked by a
+        conservative safety score. Educational analysis only — no orders are
+        placed and nothing is stored.
+      responses:
+        "200":
+          description: Suggestions (possibly empty)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TradeSuggestions"
+        "502":
+          description: Alpaca API unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /agent/optimize:
     post:
       operationId: optimizeBacktest
@@ -847,8 +870,86 @@ components:
               type: number
             avgHoldHours:
               type: number
-          required: [totalScans, signalsToday, blockedToday, openPositions, winRate, avgHoldHours]
+            realizedTradeCount:
+              type: number
+              description: Number of filled paper trades the win-rate math is based on. 0 means no realized history yet.
+            note:
+              type: string
+              nullable: true
+              description: Explanation when winRate/avgHoldHours cannot be computed from real history.
+          required: [totalScans, signalsToday, blockedToday, openPositions, winRate, avgHoldHours, realizedTradeCount]
       required: [status, account, snapshots, activity, metrics]
+    TradeSuggestion:
+      type: object
+      properties:
+        symbol:
+          type: string
+        side:
+          type: string
+          enum: [long, short]
+        action:
+          type: string
+          enum: [BUY, SELL]
+        price:
+          type: number
+        zScore:
+          type: number
+        adx:
+          type: number
+        volumeRatio:
+          type: number
+        safetyScore:
+          type: number
+        safetyGrade:
+          type: string
+          enum: [A, B, C]
+        rationale:
+          type: array
+          items:
+            type: string
+        warnings:
+          type: array
+          items:
+            type: string
+        proposedQty:
+          type: number
+        stopLoss:
+          type: number
+        takeProfit:
+          type: number
+        maxPositionPct:
+          type: number
+        regime:
+          type: string
+          nullable: true
+        cluster:
+          type: string
+          nullable: true
+      required: [symbol, side, action, price, zScore, adx, volumeRatio, safetyScore, safetyGrade, rationale, warnings, proposedQty, stopLoss, takeProfit, maxPositionPct]
+    TradeSuggestions:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [paper, demo]
+        strategyMode:
+          type: string
+          enum: [zscore, ict_hmm]
+        scannedSymbols:
+          type: array
+          items:
+            type: string
+        candidates:
+          type: number
+        suggestions:
+          type: array
+          items:
+            $ref: "#/components/schemas/TradeSuggestion"
+        disclaimer:
+          type: string
+        ranAt:
+          type: string
+      required: [mode, strategyMode, scannedSymbols, candidates, suggestions, disclaimer, ranAt]
     RunStrategyInput:
       type: object
       properties:
