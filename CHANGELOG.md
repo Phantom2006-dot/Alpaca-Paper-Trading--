@@ -4,6 +4,47 @@ All completed work is recorded here after every prompt request.
 
 ---
 
+## [Session 10] — Production error diagnosis: encryption key, PowerX outage, backtest cascade (FIXES + KEY MAP)
+
+> **For the next LLM:** the user hit three errors in production. All three were diagnosed with real probes
+> (env pulls, live curl to upstreams, DB connection attempts) — zero assumptions. Root causes below.
+
+### Errors reported → root causes found (verified, not guessed)
+1. **"Persistence requires CREDENTIALS_ENCRYPTION_KEY…" when saving credentials**
+   → The `CREDENTIALS_ENCRYPTION_KEY` env var on the Vercel **kairo-api** production project was a **placeholder string, not a real key** (11 chars of literal `[SENSITIVE]` placeholder text). `canEncrypt()` correctly rejected it. **FIX APPLIED:** generated a fresh 32-byte key (`crypto.randomBytes(32).toString('hex')` → 64 hex chars) and set it via `vercel env rm` + `vercel env add CREDENTIALS_ENCRYPTION_KEY production` on the **kairo-api** project. Redeploy required (env vars bind at deploy).
+   ⚠️ NOTE: any credential rows written under a previous *valid* key would now be `unreadable` — but since the key was never valid, **no rows existed and nothing was lost** (DB was also unreachable, see below).
+2. **"PowerX API 503: upstream connect error / connection termination" when chatting**
+   → Probed the upstream directly (`curl https://http--powerx-app--cmttpj77q5vc.code.run/v1/chat/completions`, 4 attempts): the **PowerX Cloud Run app itself returns HTTP 503 on every request** — it is down/crashed/scaled-to-zero, independent of our API. The old Render endpoint (`minis-yzdb.onrender.com`) is also 503. **NOT fixable in this repo** — the PowerX deployment must be restarted/redeployed by whoever owns it. **Code improvement applied:** `lib/powerx.ts` now detects Envoy/gateway 503 signatures (`upstream connect error`, `connection termination`, `no healthy upstream`, empty body) and returns *"PowerX service is unavailable (upstream 503 from <host>). The PowerX deployment is down or restarting — check its service health, then retry."* instead of the cryptic proxy text. All 20 unit tests still pass.
+3. **"Alpaca credentials are required for backtesting"**
+   → Not an independent bug: `fetchHistoricalBars()`/optimizer legitimately require real per-user Alpaca keys (`hasCredentials()`), and saving keys was failing due to #1. **Fixing #1 unblocks this.** After redeploy: save keys on the Credentials page → backtest works with real Alpaca data (`data.alpaca.markets/v2/stocks/{symbol}/bars`, feed=iex).
+
+### Where every key/secret lives (exact, verified via `vercel env ls` on both projects)
+| Key | Vercel project | Environment(s) | Set by | Notes |
+|---|---|---|---|---|
+| `CREDENTIALS_ENCRYPTION_KEY` | **kairo-api** | Production | **Me, this session** (32-byte hex, stored as Vercel Secret — hidden, not pullable) | AES-256-GCM key for encrypting user Alpaca keys in Postgres. NEVER change it after real keys are stored (rows become `unreadable`) |
+| `DATABASE_URL` | **kairo-api** | Production | User (⚠️ value appears to be a placeholder — **DB hostname did not resolve: `getaddrinfo ENOTFOUND`**). Replace with a real pooled Postgres URL (e.g. Neon/Supabase) for persistence to work | Lazy-DDL `alpaca_credentials` table lives here |
+| `POWERX_API_TOKEN` | **kairo-api** | Production | User (Vercel Secret) | Bearer token for the PowerX AI upstream; sent server-side only |
+| `CLERK_SECRET_KEY` | **kairo-api** | Production | User | Clerk backend auth |
+| `CLERK_PUBLISHABLE_KEY` | **kairo-api** | Production | User | Not currently read by API code |
+| `CORS_ORIGINS` | **kairo-api** | Production | User | Comma-separated frontend origin allowlist |
+| `VITE_API_URL` | **kairo** | Production | User | Backend base URL baked into frontend at build time |
+| `VITE_CLERK_PUBLISHABLE_KEY` | **kairo** | Production | User | Clerk frontend |
+| `CLERK_SECRET_KEY`, `POWERX_API_TOKEN` | **kairo** | Production | User | ⚠️ **Not needed on the frontend project** (frontend never uses them) — can be deleted for hygiene |
+| Your **Alpaca paper keys** | **Not stored anywhere yet** | — | You, via Credentials page → encrypted into Postgres | Verification hits `paper-api.alpaca.markets/v2/account` live |
+| `.env.local` files on disk | root + `artifacts/alpaca-agent/` | local dev | — | Contain only `VITE_*`/Clerk publishable values; **gitignored** (verified) |
+
+**Action still needed from the user (cannot be done from here):**
+- Replace `DATABASE_URL` on **kairo-api** with a real Postgres connection string (current one doesn't resolve).
+- Restart/redeploy the PowerX Cloud Run service to fix the AI chat 503 (or set `POWERX_API_URL` to a live deployment).
+- Redeploy **kairo-api** (`vercel deploy --prod` from repo root) so the new encryption key takes effect, then save Alpaca keys in the UI.
+
+### Files modified this session
+- `artifacts/api-server/src/lib/powerx.ts` — actionable upstream-outage error message
+- `CHANGELOG.md` — this entry
+- **Vercel kairo-api env:** `CREDENTIALS_ENCRYPTION_KEY` replaced with a valid 32-byte key
+
+---
+
 ## [Session 9] — Frontend↔backend interface audit, PowerX AI hardening, credential persistence safety (CURRENT STATE)
 
 > **Read this first (context for any LLM picking this up):** The app is "Kairo", an Alpaca **paper-only** AI trading agent.

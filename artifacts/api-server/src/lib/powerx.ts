@@ -203,10 +203,19 @@ async function request(
     if (!response.ok) {
       const detail = typeof body === "string" ? body : JSON.stringify(body);
       const suspended = /service suspended/i.test(detail);
+      // Envoy/Cloud Run-style gateway errors: the PowerX app itself is not
+      // serving (crashed, restarting, scaled to zero, or bad port). Relay an
+      // actionable message instead of the cryptic proxy text.
+      const upstreamDown =
+        response.status >= 500 &&
+        (/upstream connect error|connection termination|no healthy upstream|reset before headers/i.test(detail) ||
+          detail === "");
       throw new Error(
         suspended
           ? "PowerX service is suspended. Configure a live PowerX deployment and rotate POWERX_API_TOKEN."
-          : `PowerX API ${response.status}: ${truncate(detail || response.statusText)}`,
+          : upstreamDown
+            ? `PowerX service is unavailable (upstream ${response.status} from ${new URL(url).host}). The PowerX deployment is down or restarting — check its service health, then retry.`
+            : `PowerX API ${response.status}: ${truncate(detail || response.statusText)}`,
       );
     }
     return { body, headers: response.headers };
