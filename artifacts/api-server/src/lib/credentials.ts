@@ -87,6 +87,29 @@ const TABLE_DDL = `
 
 let schemaReady: Promise<void> | null = null;
 
+/**
+ * Turn raw Postgres connection failures into actionable guidance.
+ * The most common case on Vercel: Supabase direct-connection hosts
+ * (db.<ref>.supabase.co) resolve to IPv6 only, and Vercel serverless
+ * functions cannot dial IPv6 — the request fails with getaddrinfo ENOTFOUND.
+ * The fix is Supabase's Session Pooler hostname, which has IPv4 A records.
+ */
+function describeDbError(error: unknown): string {
+  const err = error as { code?: string; message?: string; hostname?: string };
+  const message = err?.message ?? "";
+  if (err?.code === "ENOTFOUND" || /getaddrinfo ENOTFOUND/i.test(message)) {
+    const host =
+      err?.hostname ?? /ENOTFOUND\s+(\S+)/i.exec(message)?.[1] ?? "the database host";
+    return (
+      `Database host could not be resolved (DNS): ${host}. ` +
+      `If this is a Supabase direct host (db.<ref>.supabase.co), it is IPv6-only and unreachable from Vercel serverless. ` +
+      `Use the Session Pooler string instead: Supabase dashboard → Connect → Session pooler → ` +
+      `postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres`
+    );
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 async function ensureSchema(): Promise<void> {
   if (!pool) return;
   // Cache the promise so the DDL runs at most once per process/instance even
@@ -102,7 +125,7 @@ async function ensureSchema(): Promise<void> {
         schemaReady = null;
         throw new Error(
           `Credential storage is unavailable: could not create the ${TABLE_NAME} table. ` +
-            `Check DATABASE_URL and database permissions. ${error instanceof Error ? error.message : String(error)}`,
+            `Check DATABASE_URL and database permissions. ${describeDbError(error)}`,
         );
       });
   }
@@ -190,7 +213,7 @@ export async function saveCredentials(
     logger.error({ err: error, userId }, "Failed to persist Alpaca credentials to the database");
     throw new Error(
       `Persistence failed: your Alpaca keys were verified but could not be saved to the database. ` +
-        `${error instanceof Error ? error.message : String(error)}`,
+        `${describeDbError(error)}`,
     );
   }
 }

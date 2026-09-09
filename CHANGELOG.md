@@ -4,6 +4,26 @@ All completed work is recorded here after every prompt request.
 
 ---
 
+## [Session 11] — DNS-verified root causes: Supabase IPv6-only host (DB) + PowerX gateway probe matrix
+
+### Database (`getaddrinfo ENOTFOUND db.wjuuxkgvggmuhecnwmzg.supabase.co`) — VERIFIED, fix known
+- Authoritative DNS check via Google DoH: the Supabase **direct** host `db.wjuuxkgvggmuhecnwmzg.supabase.co` has **NO IPv4 A records — IPv6 (AAAA) only**. Vercel serverless functions cannot dial IPv6 → `ENOTFOUND` is permanent for this hostname. Confirmed via Google DoH `dns.google/resolve`, and cross-checked that the Supabase **pooler** host `aws-0-us-east-1.pooler.supabase.com` **has IPv4 A records** (44.216.29.125, 44.208.221.186, 52.45.94.125).
+- **Fix (user action):** Supabase dashboard → Connect → **Session pooler** → copy the string `postgresql://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres` (note the `postgres.<ref>` username format), then `vercel env add DATABASE_URL production` on **kairo-api** and redeploy. User chose to paste the DB password but has not yet provided it — awaiting it to complete this step.
+- **Code improvement shipped:** `lib/credentials.ts` now translates raw `getaddrinfo ENOTFOUND` into actionable guidance (explains the Supabase IPv6-only direct-host issue and points to the pooler string format) on both the table-creation and persistence error paths. 20/20 tests pass, typecheck clean.
+
+### PowerX (`http--powerx-app--cmttpj77q5vc.code.run`) — FULL PROBE MATRIX, both failures are upstream-side
+- URL is already the code default (nothing to replace — verified in `lib/powerx.ts` + `scripts/src/query-powerx.ts`).
+- With the user's real token (`px_…` from their own script): `GET /v1/models` + Bearer → **200 OK** listing `powerx-agent`; GET root → 200. Gateway and TLS are alive.
+- `POST /v1/chat/completions` → **503 "upstream connect error / connection termination" 12+ times over several minutes, with and without auth** — the AI backend **behind the gateway is down**. No auth style fixes it.
+- Auth-style matrix on GET chat/completions (with and without payload): Bearer header, `token=` query, `x-api-key` header, `apikey=` query — all reach auth; with payload the gateway replies **401 "Invalid API key"** (Bearer/token/x-api-key) or **401 "Provide your px_... key via Authorization: Bearer"** (x-api-key) → the `px_…` token is **not valid on this gateway** (it likely belongs to the retired Render deployment `minis-yzdb.onrender.com`, which is also 503).
+- Polling: already fully implemented in `queryPowerX()` (processing-status detection + poll-URL follow). Polling cannot begin because requests are rejected before a job is created — upstream must be restarted and the correct token supplied.
+- **Blocked on the PowerX owner:** restart the AI backend behind the gateway AND issue a valid `px_…` token for it; then set `POWERX_API_TOKEN` on kairo-api. Nothing in this repo can substitute for that.
+
+### Commits
+- DB error-message improvement (`lib/credentials.ts`) + this entry.
+
+---
+
 ## [Session 10] — Production error diagnosis: encryption key, PowerX outage, backtest cascade (FIXES + KEY MAP)
 
 > **For the next LLM:** the user hit three errors in production. All three were diagnosed with real probes
