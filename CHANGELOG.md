@@ -4,6 +4,15 @@ All completed work is recorded here after every prompt request.
 
 ---
 
+## [Session 12] — DATABASE_URL set by user (pooler), backend redeployed, live checks green
+
+- **User completed the DB fix:** replaced `DATABASE_URL` on Vercel **kairo-api** with the Supabase **Session Pooler** connection string (IPv4-reachable, per the Session 11 verification). The exact value is Sensitive-hidden and was not inspected — trusting the user's confirmation.
+- **Backend redeployed** (`vercel deploy --prod`): `kairo-api-xi.vercel.app` Ready. Live checks: `/api/healthz` → `{"status":"ok"}`; `/api/agent/credentials` → 401 (Clerk auth gate working, as expected for an unauthenticated probe); frontend `kairo-trade-agent.vercel.app` → HTTP 200.
+- **Deferred by user:** PowerX (chat AI) — upstream backend restart + fresh `px_…` token will be supplied later. Chat remains 503-with-actionable-message until then; everything else (portfolio chat intents, paper orders, scans, backtests) does not depend on PowerX.
+- **Next verification (needs a logged-in browser session, cannot be done from CLI):** save Alpaca paper keys on the Credentials page. Expected flow now: Alpaca live verification → AES-256-GCM encrypt → INSERT into `alpaca_credentials` via the pooler → status shows `database` + key last-4 → backtests unlock with real `data.alpaca.markets` historical bars. If a DB error still appears, the pooler string format is the suspect (username must be `postgres.<ref>`, password percent-encoded).
+
+---
+
 ## [Session 11] — DNS-verified root causes: Supabase IPv6-only host (DB) + PowerX gateway probe matrix
 
 ### Database (`getaddrinfo ENOTFOUND db.wjuuxkgvggmuhecnwmzg.supabase.co`) — VERIFIED, fix known
