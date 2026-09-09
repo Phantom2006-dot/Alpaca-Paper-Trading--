@@ -4,6 +4,36 @@ All completed work is recorded here after every prompt request.
 
 ---
 
+## [Session 13] — User confirmed DB persistence works; safest-trade advisor shipped; dummy metrics removed
+
+### Verified by the user in the live app
+- **Alpaca credentials now persist to Postgres** (via the Supabase Session Pooler URL set in Session 12) and are usable — the Session 9→12 fix chain (valid 32-byte encryption key + fail-closed persistence + IPv4 pooler host) is confirmed working end-to-end by the user.
+
+### How the backtester works (documentation of existing code, verified by reading it)
+- `POST /agent/backtest` → `runBacktest()`: fetches **real** Alpaca historical bars (`data.alpaca.markets/v2/stocks/{symbol}/bars`, start/end, limit 1000, feed=iex, requires credentials — demo mode intentionally refuses), needs ≥22 bars per symbol.
+- Replays bar-by-bar **causally**: for each bar index ≥21 it builds a snapshot from only past data (`bars.slice(0, i+1)`), computes Z-score/ADX/volume (or ICT/HMM features in ict_hmm mode), and applies the exact same six guardrails as live trading (entryZ=2, adxMax=25, minVolumeRatio=1, invalidationZ=3.5, maxPositionPct=10, trailing stop 2%).
+- Simulated fills: capital split equally across symbols, position size = capital × maxPositionPct / price; exits on `exit` (Z crosses 0) or `invalidation` (|Z|≥3.5 / trailing stop); per-symbol FIFO tracking.
+- Outputs: equity curve, per-trade P&L + return% + exit reason, win rate, max drawdown, benchmark comparison (first vs last close).
+- `POST /agent/optimize` → runs the same engine over a 72-candidate grid of guardrail thresholds with a 50s deadline and returns the ranked candidates (score = return − drawdown penalty). Nothing is persisted; no orders are placed.
+
+### Safest-trade advisor (NEW — the "what should I take?" feature)
+- **Contract**: `GET /agent/suggestions` (`TradeSuggestions`/`TradeSuggestion` schemas in openapi.yaml; Orval client regenerated).
+- **Backend** `getTradeSuggestions()` in `strategy.ts`: scans the default universe (SPY, QQQ, IWM, AAPL) with live Alpaca bars, keeps only candidates that (a) emit a long/short entry signal, (b) pass all six deterministic guardrails, and (c) have no open position; ranks by a conservative **safety score (0–100)**: Z-excess margin (8–25), ADX headroom (≤15 → +25), volume confirmation (+12/+20), distance-to-mean (≥2% → +15), invalidation buffer (≥1σ → +15). Grades A ≥75, B ≥55, else C. Includes warnings (marginal Z, weak volume, near-invalidation, near-mean), proposed qty from real equity × 10% cap, stop at ±2%, target = 20-bar mean. Returns top 5 + disclaimer. No orders placed, nothing stored.
+- **Frontend**: ChatPage gained an `advice` intent ("what trades do you suggest?", "safest", "recommend", "what should I buy/sell"…) that calls the endpoint directly — **works without PowerX**; replies are formatted with grades, levels, rationale, warnings, and a one-tap next step ("buy N SYM"). Suggestion chip "What trades do you suggest?" added.
+
+### Dummy data removed (user mandate: no fake numbers)
+- `getDashboard()` previously returned hardcoded `winRate: 68.4` / `avgHoldHours: 6.2` (flagged in repo memory as placeholder). Replaced with `getRealizedMetrics()`: fetches up to 500 closed orders from Alpaca `/v2/orders?status=closed`, builds FIFO round-trips per symbol (sell closes oldest buy lot), computes real win rate and average hold hours. Zero-history → zeros + explanatory `note`; the OpenAPI `metrics` schema gained `realizedTradeCount` + nullable `note` so the UI can be honest about "not enough data" instead of showing invented percentages.
+
+### Trading capability map (all verified in code; user should confirm in UI)
+- **Manual trades**: chat ("buy 5 SPY" → confirm card) and `/agent/trade` → `placeManualTrade()` → real `POST paper-api.alpaca.markets/v2/orders` with `client_order_id` idempotency; market and limit orders; time-in-force `day`.
+- **Holding positions**: Alpaca is the source of truth (`GET /v2/positions` rendered in Account/Dashboard); the agent tracks per-symbol state and will not stack duplicates; kill switch `POST /agent/flatten` closes everything.
+- **History**: Account page = 50 most recent orders (`/v2/orders?status=all&limit=50`); Audit trail = every run decision with full JSON payloads; Activity feed = live event stream. All from real Alpaca data or real run records — no placeholders.
+
+### Deployments / validation
+- API typecheck clean, 20/20 tests pass, both builds succeed. Backend redeployed (`kairo-api-xi.vercel.app` Ready; `/api/agent/suggestions` correctly 401 unauthenticated), frontend redeployed prebuilt. Commit `0e4d3d6` pushed.
+
+---
+
 ## [Session 12] — DATABASE_URL set by user (pooler), backend redeployed, live checks green
 
 - **User completed the DB fix:** replaced `DATABASE_URL` on Vercel **kairo-api** with the Supabase **Session Pooler** connection string (IPv4-reachable, per the Session 11 verification). The exact value is Sensitive-hidden and was not inspected — trusting the user's confirmation.
