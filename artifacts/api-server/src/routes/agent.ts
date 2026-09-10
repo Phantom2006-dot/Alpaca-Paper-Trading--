@@ -34,6 +34,7 @@ import {
   validateAlpacaCredentials,
   type DataFeed,
   type Timeframe,
+  type BarsLookback,
 } from "../lib/strategy";
 import {
   deleteCredentials,
@@ -495,12 +496,14 @@ router.get("/agent/bars", async (req, res): Promise<void> => {
   const timeframe = (String(req.query["timeframe"] ?? "1Day") || "1Day") as Timeframe;
   const feed = (String(req.query["feed"] ?? "auto") || "auto") as DataFeed | "auto";
   const limit = Math.min(Math.max(Number(req.query["limit"]) || 120, 1), 500);
+  const lookbackRaw = String(req.query["lookback"] ?? "");
+  const lookback = (["1D", "5D", "1M", "3M", "1Y"].includes(lookbackRaw) ? lookbackRaw : undefined) as BarsLookback | undefined;
   if (!symbol) {
     res.status(400).json({ error: "symbol query parameter is required." });
     return;
   }
   try {
-    res.json(await getMarketBars(symbol, timeframe, feed, limit));
+    res.json(await getMarketBars(symbol, timeframe, feed, limit, lookback));
   } catch (error) {
     req.log.error({ err: error }, "Market bars fetch failed");
     res.status(502).json({ error: error instanceof Error ? error.message : "Market bars fetch failed" });

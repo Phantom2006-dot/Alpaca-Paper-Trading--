@@ -452,12 +452,13 @@ export const QueryPowerXResponse = zod.object({
 
 
 /**
- * Returns recent OHLCV bars for a symbol. When feed=auto, feeds are tried in order (iex, sip, delayed_sip) until one returns data; the feed actually used is reported.
+ * Returns recent OHLCV bars for a symbol. When feed=auto, feeds are tried in order (iex, sip, delayed_sip) until one returns data; the feed actually used is reported. `lookback` bounds the query window (time-travel for chart review).
  * @summary OHLCV bars for charting
  */
 export const getMarketBarsQuerySymbolMax = 12;
 
 export const getMarketBarsQueryTimeframeDefault = `1Day`;
+export const getMarketBarsQueryLookbackDefault = `1M`;
 export const getMarketBarsQueryFeedDefault = `auto`;
 export const getMarketBarsQueryLimitDefault = 120;
 export const getMarketBarsQueryLimitMax = 500;
@@ -467,6 +468,7 @@ export const getMarketBarsQueryLimitMax = 500;
 export const GetMarketBarsQueryParams = zod.object({
   "symbol": zod.coerce.string().min(1).max(getMarketBarsQuerySymbolMax),
   "timeframe": zod.enum(['1Min', '5Min', '15Min', '1Hour', '1Day']).default(getMarketBarsQueryTimeframeDefault),
+  "lookback": zod.enum(['1D', '5D', '1M', '3M', '1Y']).default(getMarketBarsQueryLookbackDefault).describe('How far back the chart window reaches from now.'),
   "feed": zod.enum(['auto', 'iex', 'sip', 'delayed_sip']).default(getMarketBarsQueryFeedDefault),
   "limit": zod.coerce.number().max(getMarketBarsQueryLimitMax).default(getMarketBarsQueryLimitDefault)
 })

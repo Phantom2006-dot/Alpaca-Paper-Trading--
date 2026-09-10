@@ -126,6 +126,17 @@ const checks: Check[] = [
       if (!isRecord(body) || !Array.isArray(body.bars) || body.bars.length === 0) {
         return `no bars (feed=${isRecord(body) ? body.feed : "?"})`;
       }
+      // CONTRACT GUARD: bars must be { t, o, h, l, c, v } per OhlcvBar schema.
+      // A mismatch here rendered the candlestick chart blank once already.
+      const sample = (body.bars as Array<Record<string, unknown>>)[0];
+      for (const key of ["t", "o", "h", "l", "c", "v"]) {
+        if (!(key in sample)) {
+          return `BAR SHAPE BROKEN: expected key "${key}" in ${JSON.stringify(sample).slice(0, 140)}`;
+        }
+      }
+      if (typeof sample.o !== "number" || typeof sample.c !== "number") {
+        return `BAR VALUES NOT NUMERIC: ${JSON.stringify(sample).slice(0, 140)}`;
+      }
       if (ALPACA_KEY) {
         const truth = (await alpacaData("/v2/stocks/SPY/bars?timeframe=1Day&limit=5&feed=iex&sort=desc")) as {
           bars?: Array<{ c: string }>;

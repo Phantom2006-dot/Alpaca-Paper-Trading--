@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { useGetAgentAssets, useGetMarketBars, useGetLatestQuote } from '@workspace/api-client-react';
-import type { MarketBars, GetMarketBarsTimeframe, TradableAsset } from '@workspace/api-client-react';
+import type { MarketBars, GetMarketBarsTimeframe, GetMarketBarsLookback, TradableAsset } from '@workspace/api-client-react';
 
 /**
  * TradingView-style candlestick chart, self-contained:
  *  - symbol quick-picker: search across the REAL Alpaca /v2/assets universe
  *  - timeframe tabs: 1m / 5m / 15m / 1h / 1D
+ *  - lookback tabs (time travel): 1D / 5D / 1M / 3M / 1Y — review past patterns
  *  - candles + volume from GET /api/agent/bars (feed fallback handled server-side)
  * The parent can drive the symbol (e.g. clicking a scanner row) via
  * `symbol` + `onSymbolChange`; without them the chart manages its own state.
@@ -22,6 +23,14 @@ const TIMEFRAMES: Array<{ value: GetMarketBarsTimeframe; label: string }> = [
   { value: '15Min', label: '15m' },
   { value: '1Hour', label: '1h' },
   { value: '1Day', label: '1D' },
+];
+
+const LOOKBACKS: Array<{ value: GetMarketBarsLookback; label: string }> = [
+  { value: '1D', label: '1D' },
+  { value: '5D', label: '5D' },
+  { value: '1M', label: '1M' },
+  { value: '3M', label: '3M' },
+  { value: '1Y', label: '1Y' },
 ];
 
 function fmtPrice(v: number): string {
@@ -48,6 +57,7 @@ export function CandleChart({
 }) {
   const [internalSymbol, setInternalSymbol] = useState('SPY');
   const [internalTimeframe, setInternalTimeframe] = useState<GetMarketBarsTimeframe>('1Day');
+  const [lookback, setLookback] = useState<GetMarketBarsLookback>('1M');
   const [search, setSearch] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
 
@@ -55,8 +65,8 @@ export function CandleChart({
   const timeframe = controlledTimeframe ?? internalTimeframe;
 
   const barsQuery = useGetMarketBars(
-    { symbol, timeframe, feed: 'auto', limit: 120 },
-    { query: { queryKey: ['agent-bars', symbol, timeframe], staleTime: 60_000, refetchInterval: 60_000 } },
+    { symbol, timeframe, feed: 'auto', limit: 400, lookback },
+    { query: { queryKey: ['agent-bars', symbol, timeframe, lookback], staleTime: 60_000, refetchInterval: 60_000 } },
   );
 
   // Search across the real Alpaca asset universe (stocks & ETFs).
@@ -235,6 +245,27 @@ export function CandleChart({
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Lookback (time travel) tabs: review patterns from the past month/year etc. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 16px 0' }}>
+        <span style={{ fontSize: 10, color: '#8b93a7', letterSpacing: '0.08em', textTransform: 'uppercase' }}>window</span>
+        {LOOKBACKS.map((lb) => (
+          <button
+            key={lb.value}
+            className="console-symbol-chip"
+            style={{
+              fontSize: 11,
+              padding: '3px 10px',
+              background: lookback === lb.value ? 'rgba(34,197,94,0.18)' : 'transparent',
+              borderColor: lookback === lb.value ? 'rgba(34,197,94,0.55)' : undefined,
+            }}
+            onClick={() => setLookback(lb.value)}
+            data-testid={`button-lookback-${lb.label}`}
+          >
+            {lb.label}
+          </button>
+        ))}
       </div>
 
       <div className="card-header" style={{ paddingTop: 8 }}>

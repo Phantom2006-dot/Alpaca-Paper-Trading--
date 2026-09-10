@@ -576,13 +576,17 @@ async function fetchBarsWithFeed(
   timeframe: Timeframe,
   feed: DataFeed,
   limit: number,
+  start?: string,
 ): Promise<Bar[]> {
   const query = new URLSearchParams({
     timeframe,
     limit: String(limit),
     feed,
-    sort: "asc",
+    // With a lookback window, ask for the most recent bars first (desc) and
+    // re-sort below; without one, keep the previous asc behaviour.
+    sort: start ? "desc" : "asc",
   });
+  if (start) query.set("start", start);
   const response = await fetch(
     `${MARKET_DATA_URL}/stocks/${encodeURIComponent(symbol)}/bars?${query.toString()}`,
     {
@@ -601,7 +605,7 @@ async function fetchBarsWithFeed(
   const payload = (await response.json()) as {
     bars?: Array<{ t?: string; o?: number; c: number; h: number; l: number; v: number }>;
   };
-  return (payload.bars ?? []).map((bar) => ({
+  const bars = (payload.bars ?? []).map((bar) => ({
     timestamp: bar.t,
     open: bar.o !== undefined ? toNumber(bar.o) : undefined,
     close: toNumber(bar.c),
@@ -609,6 +613,7 @@ async function fetchBarsWithFeed(
     low: toNumber(bar.l),
     volume: toNumber(bar.v),
   }));
+  return start ? bars.reverse() : bars;
 }
 
 /**
@@ -642,29 +647,68 @@ async function fetchBars(
   throw lastError instanceof Error ? lastError : new Error("Market data unavailable");
 }
 
+/** Wire shape per the OpenAPI contract (OhlcvBar): the chart reads t/o/h/l/c/v. */
+export interface WireBar {
+  t: string | null;
+  o: number;
+  h: number;
+  l: number;
+  c: number;
+  v: number;
+}
+
+function toWireBars(bars: Bar[]): WireBar[] {
+  return bars.map((b) => ({
+    t: b.timestamp ?? null,
+    o: b.open ?? b.close,
+    h: b.high,
+    l: b.low,
+    c: b.close,
+    v: b.volume,
+  }));
+}
+
+const LOOKBACK_DAYS: Record<"1D" | "5D" | "1M" | "3M" | "1Y", number> = {
+  "1D": 1,
+  "5D": 5,
+  "1M": 30,
+  "3M": 91,
+  "1Y": 365,
+};
+
+export type BarsLookback = keyof typeof LOOKBACK_DAYS;
+
 /** OHLCV chart data for the UI. Tries each feed until one returns bars. */
 export async function getMarketBars(
   symbol: string,
   timeframe: Timeframe = "1Day",
   feed: DataFeed | "auto" = "auto",
   limit = 120,
-): Promise<{ symbol: string; timeframe: string; feed: string; bars: Bar[] }> {
+  lookback?: BarsLookback,
+): Promise<{ symbol: string; timeframe: string; feed: string; lookback?: string; bars: WireBar[] }> {
   const normalized = symbol.trim().toUpperCase();
   if (!normalized) throw new Error("Symbol is required.");
+  const startIso = lookback
+    ? new Date(Date.now() - LOOKBACK_DAYS[lookback] * 86_400_000).toISOString()
+    : undefined;
   if (!hasCredentials()) {
-    return { symbol: normalized, timeframe, feed: "demo", bars: demoBars(normalized).slice(-limit) };
+    let demo = demoBars(normalized);
+    if (startIso) demo = demo.filter((b) => (b.timestamp ?? "") >= startIso);
+    return { symbol: normalized, timeframe, feed: "demo", ...(lookback ? { lookback } : {}), bars: toWireBars(demo).slice(-limit) };
   }
   const feedOrder: DataFeed[] = feed === "auto" ? ["iex", "sip", "delayed_sip"] : [feed];
   for (const candidate of feedOrder) {
     try {
-      const bars = await fetchBarsWithFeed(normalized, timeframe, candidate, limit);
-      if (bars.length > 0) return { symbol: normalized, timeframe, feed: candidate, bars };
+      const bars = await fetchBarsWithFeed(normalized, timeframe, candidate, limit, startIso);
+      if (bars.length > 0) {
+        return { symbol: normalized, timeframe, feed: candidate, ...(lookback ? { lookback } : {}), bars: toWireBars(bars) };
+      }
       recordMarketDataFailure(new Error(`feed=${candidate} returned zero bars`), candidate);
     } catch (error) {
       recordMarketDataFailure(error, candidate);
     }
   }
-  return { symbol: normalized, timeframe, feed: "none", bars: [] };
+  return { symbol: normalized, timeframe, feed: "none", ...(lookback ? { lookback } : {}), bars: [] };
 }
 
 /**
@@ -718,6 +762,15 @@ export async function getLatestQuote(symbol: string) {
   };
 }
 
+type OptionSnapshotRaw = {
+  symbol?: string;
+  greeks?: { delta?: number };
+  latest_quote?: { bid?: number; ask?: number };
+  latestQuote?: { bid?: number; ask?: number };
+  latest_trade?: { p?: number };
+  latestTrade?: { p?: number };
+};
+
 /**
  * Option chain snapshot (US equity/ETF options, OCC symbols) from Alpaca's
  * options market data. Available in the paper environment by default per
@@ -729,8 +782,10 @@ export async function getOptionChain(underlying: string) {
   }
   const sym = underlying.trim().toUpperCase();
   if (!sym) throw new Error("Underlying symbol is required.");
+  // MARKET_DATA_URL ends in /v2 (stock data); options live under /v1beta1 on the same host.
+  const optionsBase = new URL(MARKET_DATA_URL).origin;
   const response = await fetch(
-    `${MARKET_DATA_URL.replace("data.alpaca.markets", "data.alpaca.markets")}/v1beta1/options/snapshots/${encodeURIComponent(sym)}?limit=100`,
+    `${optionsBase}/v1beta1/options/snapshots/${encodeURIComponent(sym)}?limit=100`,
     {
       headers: {
         "APCA-API-KEY-ID": getAlpacaCredentials().apiKey,
@@ -745,16 +800,17 @@ export async function getOptionChain(underlying: string) {
     throw error;
   }
   const payload = (await response.json()) as {
-    snapshots?: Array<{
-      symbol?: string;
-      greeks?: { delta?: number };
-      latest_quote?: { bid?: number; ask?: number };
-      latest_trade?: { p?: number };
-    }>;
+    // Alpaca returns a map keyed by OCC symbol; tolerate an array shape too,
+    // and both snake_case (latest_quote/greeks) and camelCase variants.
+    snapshots?: Record<string, OptionSnapshotRaw> | OptionSnapshotRaw[];
   };
   // OCC format: UNDERLYING + YYMMDD + C/P + strike*1000 (8 digits)
   const occRe = /^([A-Z]+)(\d{6})([CP])(\d{8})$/;
-  const contracts = (payload.snapshots ?? [])
+  const raw = payload.snapshots;
+  const entries: Array<{ symbol?: string } & OptionSnapshotRaw> = Array.isArray(raw)
+    ? raw.filter((s): s is OptionSnapshotRaw => Boolean(s))
+    : Object.entries(raw ?? {}).map(([occ, snap]) => ({ symbol: occ, ...snap }));
+  const contracts = entries
     .map((snap) => {
       const occ = snap.symbol ?? "";
       const m = occRe.exec(occ);
@@ -766,8 +822,8 @@ export async function getOptionChain(underlying: string) {
         strike: Number(m[4]) / 1000,
         expiry,
         type: m[3] === "C" ? ("call" as const) : ("put" as const),
-        bid: snap.latest_quote?.bid ?? null,
-        ask: snap.latest_quote?.ask ?? null,
+        bid: (snap.latest_quote ?? snap.latestQuote)?.bid ?? null,
+        ask: (snap.latest_quote ?? snap.latestQuote)?.ask ?? null,
         openInterest: null,
         delta: snap.greeks?.delta ?? null,
       };

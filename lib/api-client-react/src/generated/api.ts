@@ -1069,7 +1069,7 @@ export const getGetMarketBarsUrl = (params: GetMarketBarsParams,) => {
 }
 
 /**
- * Returns recent OHLCV bars for a symbol. When feed=auto, feeds are tried in order (iex, sip, delayed_sip) until one returns data; the feed actually used is reported.
+ * Returns recent OHLCV bars for a symbol. When feed=auto, feeds are tried in order (iex, sip, delayed_sip) until one returns data; the feed actually used is reported. `lookback` bounds the query window (time-travel for chart review).
  * @summary OHLCV bars for charting
  */
 export const getMarketBars = async (params: GetMarketBarsParams, options?: Parameters<typeof customFetch>[1]): Promise<MarketBars> => {

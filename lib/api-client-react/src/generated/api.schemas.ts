@@ -714,6 +714,10 @@ export type GetMarketBarsParams = {
  */
 symbol: string;
 timeframe?: GetMarketBarsTimeframe;
+/**
+ * How far back the chart window reaches from now.
+ */
+lookback?: GetMarketBarsLookback;
 feed?: GetMarketBarsFeed;
 /**
  * @maximum 500
@@ -730,6 +734,17 @@ export const GetMarketBarsTimeframe = {
   '15Min': '15Min',
   '1Hour': '1Hour',
   '1Day': '1Day',
+} as const;
+
+export type GetMarketBarsLookback = typeof GetMarketBarsLookback[keyof typeof GetMarketBarsLookback];
+
+
+export const GetMarketBarsLookback = {
+  '1D': '1D',
+  '5D': '5D',
+  '1M': '1M',
+  '3M': '3M',
+  '1Y': '1Y',
 } as const;
 
 export type GetMarketBarsFeed = typeof GetMarketBarsFeed[keyof typeof GetMarketBarsFeed];

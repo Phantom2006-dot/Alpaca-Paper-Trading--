@@ -295,7 +295,7 @@ paths:
       operationId: getMarketBars
       tags: [agent]
       summary: OHLCV bars for charting
-      description: Returns recent OHLCV bars for a symbol. When feed=auto, feeds are tried in order (iex, sip, delayed_sip) until one returns data; the feed actually used is reported.
+      description: Returns recent OHLCV bars for a symbol. When feed=auto, feeds are tried in order (iex, sip, delayed_sip) until one returns data; the feed actually used is reported. `lookback` bounds the query window (time-travel for chart review).
       parameters:
         - name: symbol
           in: query
@@ -310,6 +310,13 @@ paths:
             type: string
             enum: [1Min, 5Min, 15Min, 1Hour, 1Day]
             default: 1Day
+        - name: lookback
+          in: query
+          schema:
+            type: string
+            enum: [1D, 5D, 1M, 3M, 1Y]
+            default: 1M
+          description: How far back the chart window reaches from now.
         - name: feed
           in: query
           schema:

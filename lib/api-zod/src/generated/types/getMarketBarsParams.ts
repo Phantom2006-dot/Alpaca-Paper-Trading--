@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { GetMarketBarsFeed } from './getMarketBarsFeed';
+import type { GetMarketBarsLookback } from './getMarketBarsLookback';
 import type { GetMarketBarsTimeframe } from './getMarketBarsTimeframe';
 
 export type GetMarketBarsParams = {
@@ -15,6 +16,10 @@ export type GetMarketBarsParams = {
  */
 symbol: string;
 timeframe?: GetMarketBarsTimeframe;
+/**
+ * How far back the chart window reaches from now.
+ */
+lookback?: GetMarketBarsLookback;
 feed?: GetMarketBarsFeed;
 /**
  * @maximum 500

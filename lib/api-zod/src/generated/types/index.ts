@@ -33,6 +33,7 @@ export * from './flattenResultMode';
 export * from './getAgentAssetsParams';
 export * from './getLatestQuoteParams';
 export * from './getMarketBarsFeed';
+export * from './getMarketBarsLookback';
 export * from './getMarketBarsParams';
 export * from './getMarketBarsTimeframe';
 export * from './guardrailState';

@@ -4,6 +4,34 @@ All completed work is recorded here after every prompt request.
 
 ---
 
+## [Session 16] — Blank-candles bug fixed (contract violation), options-chain 404 fixed, chart time-travel (1D→1Y)
+
+### 1. Blank candles — root cause: backend violated the API contract
+- Backend returned bars as `{timestamp, open, high, low, close, volume}` (internal `Bar` shape) while the OpenAPI schema `OhlcvBar` (and therefore the generated frontend types and the chart) specifies **`{t, o, h, l, c, v}`**. The chart mapped `b.o/b.c/…` → all `undefined` → SVG rendered but nothing drawn.
+- **Fix**: `getMarketBars()` now maps internal bars to the wire shape via `toWireBars()` (`WireBar` type = OhlcvBar). Contract is again the single source of truth.
+- **Regression guard**: the endpoint audit script now fails if `/agent/bars` ever returns a bar missing any of `t/o/h/l/c/v` or non-numeric `o/c`.
+
+### 2. Options chain 404 ("Options data 404: endpoint not found") — root cause: double version path
+- `MARKET_DATA_URL = https://data.alpaca.markets/v2` and `getOptionChain()` appended `/v1beta1/...` → requested `data.alpaca.markets/v2/v1beta1/options/snapshots/...` → Alpaca 404.
+- **Fix**: derive the host via `new URL(MARKET_DATA_URL).origin` and call `${origin}/v1beta1/options/snapshots/{underlying}?limit=100`.
+- Parser made shape-tolerant: Alpaca returns `snapshots` as a **map keyed by OCC symbol** (docs pages 404'd during verification, so the parser handles map *and* array, snake_case *and* camelCase `latest_quote`/`latestQuote`). If a different shape arrives, `count: 0` + diagnostics show the raw upstream body instead of a crash.
+- Note: chat/manual option orders were already correct (OCC symbol, limit-only, per paper-options docs).
+
+### 3. Chart time-travel — new `lookback` parameter
+- Spec: `/agent/bars` gained `lookback` query enum **`1D | 5D | 1M | 3M | 1Y`** (default 1M); backend bounds the Alpaca query with `start`, requests `sort=desc` + reverses so the newest `limit` bars within the window are kept.
+- Frontend: green **WINDOW** tab row (1D/5D/1M/3M/1Y) under the timeframe tabs; bars query cache keyed by symbol+timeframe+lookback; limit raised 120→400 so 1Y windows stay dense.
+
+### Deployment & verification
+- Backend deployed from **repo root** (pnpm lockfile present; the nested-project deploy path re-broke npm/workspace:* in testing) → Ready, healthz OK.
+- Frontend deployed prebuilt with SPA routes config `{handle: filesystem} → index.html` (deep links verified 200) and re-aliased; live bundle `index-DLvUlXvC.js` hash-verified to contain lookback tabs, order ticket, symbol search.
+- Typecheck ✓ (both), 20/20 unit tests ✓, endpoint audit **10/10** (tokenless mode).
+
+### Run Scan & Preview-only (answered, from code)
+- **Run scan** = one manual strategy pass over the lane's symbols (`POST /agent/run`): fetch snapshots → compute signal → check all 6 guardrails → act. With **Preview only OFF** + credentials saved, it places real paper orders (per-user idempotency, 10% position sizing). With it **ON**, nothing orders — actions are returned as `simulated` for review (demo mode also simulates, since there's no data source without keys).
+- **Preview only (dryRun) is the safe default while exploring**: OFF = real paper orders on Alpaca; ON = shadow results only.
+
+---
+
 ## [Session 15] — Real-time quotes, endpoint truth-audit, deployment root fixed, live-bundle proof
 
 ### Backend
