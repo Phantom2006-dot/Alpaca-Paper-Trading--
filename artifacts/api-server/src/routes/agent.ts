@@ -13,6 +13,9 @@ import {
 
 import {
   flattenPositions,
+  getMarketBars,
+  getMarketDataDiagnostics,
+  getOptionChain,
   guardrails,
   getAgentAccount,
   getAgentAssets,
@@ -28,6 +31,8 @@ import {
   startAgent,
   stopAgent,
   validateAlpacaCredentials,
+  type DataFeed,
+  type Timeframe,
 } from "../lib/strategy";
 import {
   deleteCredentials,
@@ -456,6 +461,7 @@ router.post("/agent/trade", async (req, res): Promise<void> => {
         parsed.data.orderType,
         parsed.data.limitPrice ?? null,
         parsed.data.idempotencyKey ?? null,
+        parsed.data.optionSymbol ?? null,
       ),
     );
   } catch (error) {
@@ -480,6 +486,38 @@ router.get("/agent/market/:symbol", async (req, res): Promise<void> => {
   } catch (error) {
     req.log.error({ err: error }, "Market snapshot failed");
     res.status(502).json({ error: error instanceof Error ? error.message : "Market snapshot failed" });
+  }
+});
+
+router.get("/agent/bars", async (req, res): Promise<void> => {
+  const symbol = String(req.query["symbol"] ?? "").trim().toUpperCase();
+  const timeframe = (String(req.query["timeframe"] ?? "1Day") || "1Day") as Timeframe;
+  const feed = (String(req.query["feed"] ?? "auto") || "auto") as DataFeed | "auto";
+  const limit = Math.min(Math.max(Number(req.query["limit"]) || 120, 1), 500);
+  if (!symbol) {
+    res.status(400).json({ error: "symbol query parameter is required." });
+    return;
+  }
+  try {
+    res.json(await getMarketBars(symbol, timeframe, feed, limit));
+  } catch (error) {
+    req.log.error({ err: error }, "Market bars fetch failed");
+    res.status(502).json({ error: error instanceof Error ? error.message : "Market bars fetch failed" });
+  }
+});
+
+router.get("/agent/diagnostics/market-data", (req, res): void => {
+  res.json(getMarketDataDiagnostics());
+});
+
+router.get("/agent/options/:underlying", async (req, res): Promise<void> => {
+  try {
+    res.json(await getOptionChain(req.params.underlying));
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : "Option chain fetch failed";
+    req.log.warn({ err: error }, "Option chain fetch failed");
+    const isCredentialError = /credentials/i.test(msg);
+    res.status(isCredentialError ? 422 : 502).json({ error: msg });
   }
 });
 

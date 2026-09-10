@@ -4,8 +4,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Activity, AlertTriangle, Check, ChevronRight, Play, RefreshCw,
   Shield, ShieldCheck, Zap, X, Brain, BarChart3, TrendingUp,
-  ArrowRight, CircleDot,
+  ArrowRight, CircleDot, CandlestickChart, Stethoscope,
 } from 'lucide-react';
+import {
+  useGetAgentAssets, useGetOptionChain,
+} from '@workspace/api-client-react';
+import type { TradableAsset } from '@workspace/api-client-react';
+import { CandleChart } from '../components/CandleChart';
 
 function cx(...c: Array<string | false | null | undefined>) {
   return c.filter(Boolean).join(' ');
@@ -49,6 +54,9 @@ const DEFAULT_SYMBOLS = ['SPY', 'QQQ', 'IWM', 'AAPL'];
 export function ConsolePage() {
   const [symbol, setSymbol] = useState('SPY');
   const [customSymbol, setCustomSymbol] = useState('');
+  const [timeframe, setTimeframe] = useState<'1Min' | '5Min' | '15Min' | '1Hour' | '1Day'>('1Day');
+  const [assetSearch, setAssetSearch] = useState('');
+  const [showOptions, setShowOptions] = useState(false);
   const [strategyMode, setStrategyMode] = useState<'zscore' | 'ict_hmm'>('zscore');
   const [steps, setSteps] = useState<StepState[]>(Array(7).fill({ status: 'pending' }));
   const [running, setRunning] = useState(false);
@@ -59,6 +67,18 @@ export function ConsolePage() {
   const { getToken } = useAuth();
 
   const activeSymbol = customSymbol.trim().toUpperCase() || symbol;
+
+  // Asset universe search (real Alpaca /v2/assets — stocks & ETFs) for the dropdown.
+  const assetsQuery = useGetAgentAssets(
+    { search: assetSearch },
+    { query: { queryKey: ['agent-assets', assetSearch], staleTime: 300_000, enabled: assetSearch.trim().length > 0 } },
+  );
+
+  // Option chain for the selected underlying (options are paper-enabled on Alpaca).
+  const optionsQuery = useGetOptionChain(
+    activeSymbol,
+    { query: { queryKey: ['agent-options', activeSymbol], enabled: showOptions, staleTime: 60_000, retry: false } },
+  );
 
   function resetPipeline() {
     setSteps(Array(7).fill({ status: 'pending' }));
@@ -195,7 +215,46 @@ export function ConsolePage() {
               onChange={(e) => setCustomSymbol(e.target.value.toUpperCase())}
               maxLength={8}
             />
+            <select
+              className="console-symbol-input"
+              style={{ maxWidth: 110 }}
+              value={timeframe}
+              onChange={(e) => setTimeframe(e.target.value as typeof timeframe)}
+              aria-label="Chart timeframe"
+            >
+              <option value="1Min">1 min</option>
+              <option value="5Min">5 min</option>
+              <option value="15Min">15 min</option>
+              <option value="1Hour">1 hour</option>
+              <option value="1Day">1 day</option>
+            </select>
           </div>
+          <div className="console-symbol-row">
+            <input
+              className="console-symbol-input"
+              style={{ flex: 1 }}
+              placeholder="Search all Alpaca stocks & ETFs (e.g. TSLA, VOO, PLTR)…"
+              value={assetSearch}
+              onChange={(e) => setAssetSearch(e.target.value)}
+            />
+          </div>
+          {assetSearch.trim() && (
+            <div className="console-symbol-row" style={{ flexWrap: 'wrap', gap: 6 }}>
+              {assetsQuery.data?.slice(0, 8).map((asset: TradableAsset) => (
+                <button
+                  key={asset.symbol}
+                  className="console-symbol-chip"
+                  title={`${asset.name} · ${asset.exchange}`}
+                  onClick={() => { setCustomSymbol(asset.symbol); setAssetSearch(''); }}
+                >
+                  {asset.symbol}
+                </button>
+              ))}
+              {!assetsQuery.isLoading && !assetsQuery.data?.length && (
+                <span style={{ fontSize: 11, color: '#8b93a7' }}>No tradable assets match.</span>
+              )}
+            </div>
+          )}
           <div className="console-run-row">
             <div className="console-active-symbol">
               <CircleDot size={12} />
@@ -210,6 +269,72 @@ export function ConsolePage() {
               {running ? 'Running…' : 'Run Agent Cycle'}
             </button>
           </div>
+        </div>
+
+        {/* Candlestick chart — real Alpaca OHLCV bars */}
+        <CandleChart symbol={activeSymbol} timeframe={timeframe} />
+
+        {/* Options chain (Alpaca options are enabled in paper by default) */}
+        <div className="panel">
+          <div className="card-header">
+            <div>
+              <div className="eyebrow">options market</div>
+              <h3 className="card-title">{activeSymbol} option chain</h3>
+            </div>
+            <button className="button button-secondary" onClick={() => setShowOptions((v) => !v)}>
+              <CandlestickChart size={13} />
+              {showOptions ? 'Hide chain' : 'Load chain'}
+            </button>
+          </div>
+          {showOptions && (
+            <div style={{ padding: '0 16px 16px' }}>
+              {optionsQuery.isLoading && <p style={{ fontSize: 12, color: '#8b93a7' }}>Loading contracts…</p>}
+              {optionsQuery.error && (
+                <p style={{ fontSize: 12, color: '#f59e0b' }}>
+                  {(optionsQuery.error as Error).message}
+                </p>
+              )}
+              {optionsQuery.data && optionsQuery.data.count === 0 && (
+                <p style={{ fontSize: 12, color: '#8b93a7' }}>No listed contracts returned for {activeSymbol}.</p>
+              )}
+              {optionsQuery.data && optionsQuery.data.count > 0 && (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', fontSize: 11.5, borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ color: '#8b93a7', textAlign: 'left' }}>
+                        <th style={{ padding: '6px 8px' }}>OCC symbol</th>
+                        <th style={{ padding: '6px 8px' }}>Type</th>
+                        <th style={{ padding: '6px 8px' }}>Strike</th>
+                        <th style={{ padding: '6px 8px' }}>Expiry</th>
+                        <th style={{ padding: '6px 8px' }}>Bid</th>
+                        <th style={{ padding: '6px 8px' }}>Ask</th>
+                        <th style={{ padding: '6px 8px' }}>Δ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {optionsQuery.data.contracts.slice(0, 25).map((c) => (
+                        <tr key={c.occSymbol} style={{ borderTop: '1px solid rgba(148,163,184,0.12)' }}>
+                          <td style={{ padding: '6px 8px', fontFamily: 'monospace' }}>{c.occSymbol}</td>
+                          <td style={{ padding: '6px 8px', color: c.type === 'call' ? '#22c55e' : '#ef4444' }}>
+                            {c.type.toUpperCase()}
+                          </td>
+                          <td style={{ padding: '6px 8px' }}>${c.strike.toFixed(2)}</td>
+                          <td style={{ padding: '6px 8px' }}>{c.expiry}</td>
+                          <td style={{ padding: '6px 8px' }}>{c.bid != null ? `$${c.bid.toFixed(2)}` : '—'}</td>
+                          <td style={{ padding: '6px 8px' }}>{c.ask != null ? `$${c.ask.toFixed(2)}` : '—'}</td>
+                          <td style={{ padding: '6px 8px' }}>{c.delta != null ? c.delta.toFixed(3) : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p style={{ fontSize: 10.5, color: '#8b93a7', marginTop: 8 }}>
+                    Showing first {Math.min(25, optionsQuery.data.count)} of {optionsQuery.data.count} contracts. Options orders are
+                    limit-only (Alpaca requirement) — place via chat: “buy 1 {optionsQuery.data.contracts[0].occSymbol} at 1.25”.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Pipeline stepper */}

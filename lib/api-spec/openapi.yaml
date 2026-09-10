@@ -290,6 +290,103 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /agent/bars:
+    get:
+      operationId: getMarketBars
+      tags: [agent]
+      summary: OHLCV bars for charting
+      description: Returns recent OHLCV bars for a symbol. When feed=auto, feeds are tried in order (iex, sip, delayed_sip) until one returns data; the feed actually used is reported.
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 12
+        - name: timeframe
+          in: query
+          schema:
+            type: string
+            enum: [1Min, 5Min, 15Min, 1Hour, 1Day]
+            default: 1Day
+        - name: feed
+          in: query
+          schema:
+            type: string
+            enum: [auto, iex, sip, delayed_sip]
+            default: auto
+        - name: limit
+          in: query
+          schema:
+            type: number
+            default: 120
+            maximum: 500
+      responses:
+        "200":
+          description: Bars
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketBars"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Alpaca market data unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /agent/diagnostics/market-data:
+    get:
+      operationId: getMarketDataDiagnostics
+      tags: [agent]
+      summary: Recent market-data fetch diagnostics
+      description: Lists the most recent upstream bar fetch failures and the feed fallback order, so empty charts and scans can be explained.
+      responses:
+        "200":
+          description: Diagnostics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketDataDiagnostics"
+  /agent/options/{underlying}:
+    get:
+      operationId: getOptionChain
+      tags: [agent]
+      summary: Option chain snapshot for an underlying
+      description: Returns listed US equity/ETF option contracts (OCC symbols) for the underlying from Alpaca's options market data. Requires Alpaca credentials.
+      parameters:
+        - name: underlying
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 8
+      responses:
+        "200":
+          description: Option chain
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OptionChain"
+        "422":
+          description: Credentials required or Alpaca rejected the request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Alpaca API unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /agent/suggestions:
     get:
       operationId: getTradeSuggestions
@@ -819,6 +916,105 @@ components:
         - updatedAt
         - tradeBlockedReason
         - cluster
+    OhlcvBar:
+      type: object
+      properties:
+        t:
+          type: string
+          nullable: true
+        o:
+          type: number
+        h:
+          type: number
+        l:
+          type: number
+        c:
+          type: number
+        v:
+          type: number
+      required: [o, h, l, c, v]
+    MarketBars:
+      type: object
+      properties:
+        symbol:
+          type: string
+        timeframe:
+          type: string
+        feed:
+          type: string
+          description: The feed that actually produced the bars (auto resolves through the fallback order).
+        bars:
+          type: array
+          items:
+            $ref: "#/components/schemas/OhlcvBar"
+      required: [symbol, timeframe, feed, bars]
+    MarketDataDiagnosticEntry:
+      type: object
+      properties:
+        at:
+          type: string
+        host:
+          type: string
+        status:
+          type: number
+          nullable: true
+        message:
+          type: string
+        feed:
+          type: string
+          nullable: true
+      required: [at, host, message]
+    MarketDataDiagnostics:
+      type: object
+      properties:
+        checkedAt:
+          type: string
+        feedOrder:
+          type: array
+          items:
+            type: string
+        recent:
+          type: array
+          items:
+            $ref: "#/components/schemas/MarketDataDiagnosticEntry"
+      required: [checkedAt, feedOrder, recent]
+    OptionContract:
+      type: object
+      properties:
+        occSymbol:
+          type: string
+        strike:
+          type: number
+        expiry:
+          type: string
+        type:
+          type: string
+          enum: [call, put]
+        bid:
+          type: number
+          nullable: true
+        ask:
+          type: number
+          nullable: true
+        openInterest:
+          type: number
+          nullable: true
+        delta:
+          type: number
+          nullable: true
+      required: [occSymbol, strike, expiry, type]
+    OptionChain:
+      type: object
+      properties:
+        underlying:
+          type: string
+        count:
+          type: number
+        contracts:
+          type: array
+          items:
+            $ref: "#/components/schemas/OptionContract"
+      required: [underlying, count, contracts]
     StrategyActivity:
       type: object
       properties:
@@ -1013,10 +1209,16 @@ components:
           exclusiveMinimum: 0
         orderType:
           type: string
-          enum: [market, limit]
+          enum: [market, limit, option]
+          description: option places an options contract order; symbol must be the OCC contract symbol passed in optionSymbol.
         limitPrice:
           type: number
           nullable: true
+        optionSymbol:
+          type: string
+          nullable: true
+          maxLength: 30
+          description: OCC option contract symbol, required when orderType=option (e.g. SPY250919C00500000).
         idempotencyKey:
           type: string
           nullable: true

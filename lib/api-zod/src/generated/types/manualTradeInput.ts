@@ -17,7 +17,13 @@ export interface ManualTradeInput {
   side: ManualTradeInputSide;
   /** @exclusiveMinimum 0 */
   qty: number;
+  /** option places an options contract order; symbol must be the OCC contract symbol passed in optionSymbol. */
   orderType: ManualTradeInputOrderType;
   limitPrice?: number | null;
+  /**
+     * OCC option contract symbol, required when orderType=option (e.g. SPY250919C00500000).
+     * @maxLength 30
+     */
+  optionSymbol?: string | null;
   idempotencyKey?: string | null;
 }

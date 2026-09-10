@@ -6,10 +6,14 @@
  * OpenAPI spec version: 0.1.0
  */
 
+/**
+ * option places an options contract order; symbol must be the OCC contract symbol passed in optionSymbol.
+ */
 export type ManualTradeInputOrderType = typeof ManualTradeInputOrderType[keyof typeof ManualTradeInputOrderType];
 
 
 export const ManualTradeInputOrderType = {
   market: 'market',
   limit: 'limit',
+  option: 'option',
 } as const;

@@ -14,7 +14,7 @@ function cx(...c: Array<string | false | null | undefined>) {
 const API = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, '') ?? '';
 
 type MsgRole = 'user' | 'agent' | 'system';
-type OrderPreview = { symbol: string; side: 'buy' | 'sell'; qty: number; orderType: 'market' | 'limit'; limitPrice?: number };
+type OrderPreview = { symbol: string; side: 'buy' | 'sell'; qty: number; orderType: 'market' | 'limit' | 'option'; limitPrice?: number; optionSymbol?: string };
 
 interface Msg {
   id: string;
@@ -30,8 +30,8 @@ interface Msg {
 // Parses natural language into structured intents without an LLM dependency.
 
 type Intent =
-  | { type: 'buy'; symbol: string; qty: number; orderType: 'market' | 'limit'; limitPrice?: number }
-  | { type: 'sell'; symbol: string; qty: number; orderType: 'market' | 'limit'; limitPrice?: number }
+  | { type: 'buy'; symbol: string; qty: number; orderType: 'market' | 'limit' | 'option'; limitPrice?: number; optionSymbol?: string }
+  | { type: 'sell'; symbol: string; qty: number; orderType: 'market' | 'limit' | 'option'; limitPrice?: number; optionSymbol?: string }
   | { type: 'portfolio' }
   | { type: 'status' }
   | { type: 'advice' }
@@ -47,9 +47,11 @@ type Intent =
 function parseIntent(text: string): Intent {
   const t = text.toLowerCase().trim();
 
-  // Buy/sell: "buy 10 SPY", "sell 5 AAPL at 180", "buy SPY 3 shares market"
-  const tradeRe = /^(buy|sell)\s+(\d+(?:\.\d+)?)\s+([a-z]{1,8})(?:\s+(?:at|@|limit)?\s*\$?(\d+(?:\.\d+)?))?/i;
-  const tradeRe2 = /^(buy|sell)\s+([a-z]{1,8})\s+(\d+(?:\.\d+)?)(?:\s+(?:at|@|limit)?\s*\$?(\d+(?:\.\d+)?))?/i;
+  // Buy/sell: "buy 10 SPY", "sell 5 AAPL at 180", "buy SPY 3 shares market",
+  // options: "buy 1 SPY250919C00500000 at 1.25" (OCC contract symbol)
+  const occRe = /^[A-Z]+\d{6}[CP]\d{8}$/;
+  const tradeRe = /^(buy|sell)\s+(\d+(?:\.\d+)?)\s+([a-z0-9]{1,22})(?:\s+(?:at|@|limit)?\s*\$?(\d+(?:\.\d+)?))?/i;
+  const tradeRe2 = /^(buy|sell)\s+([a-z0-9]{1,22})\s+(\d+(?:\.\d+)?)(?:\s+(?:at|@|limit)?\s*\$?(\d+(?:\.\d+)?))?/i;
   let m = tradeRe.exec(t) ?? tradeRe2.exec(t);
   if (m) {
     const side = m[1].toLowerCase() as 'buy' | 'sell';
@@ -57,7 +59,15 @@ function parseIntent(text: string): Intent {
     const qty = parseFloat(isRe1 ? m[2] : m[3]);
     const symbol = (isRe1 ? m[3] : m[2]).toUpperCase();
     const limitPrice = m[4] ? parseFloat(m[4]) : undefined;
-    return { type: side, symbol, qty: Math.max(1, Math.floor(qty)), orderType: limitPrice ? 'limit' : 'market', limitPrice };
+    const isOption = occRe.test(symbol);
+    return {
+      type: side,
+      symbol: isOption ? symbol.split(/(?=\d{6}[CP])/)[0] : symbol,
+      qty: Math.max(1, Math.floor(qty)),
+      orderType: isOption ? 'option' : limitPrice ? 'limit' : 'market',
+      limitPrice,
+      optionSymbol: isOption ? symbol : undefined,
+    } as Intent;
   }
 
   if (/portfolio|positions?|holdings?|account|balance|equity|cash/.test(t)) return { type: 'portfolio' };
@@ -144,11 +154,19 @@ function buildAgentReply(
 
     case 'buy':
     case 'sell': {
-      const { symbol, qty, orderType, limitPrice } = intent;
-      const preview: OrderPreview = { symbol, side: intent.type, qty, orderType, limitPrice };
-      const priceStr = orderType === 'limit' && limitPrice ? ` at $${limitPrice.toFixed(2)} limit` : ' at market';
+      const { symbol, qty, orderType, limitPrice, optionSymbol } = intent;
+      const preview: OrderPreview = { symbol: optionSymbol ?? symbol, side: intent.type, qty, orderType, limitPrice };
+      const priceStr =
+        orderType === 'option'
+          ? ` — OCC contract ${optionSymbol} at $${limitPrice?.toFixed(2) ?? '?'}`
+          : orderType === 'limit' && limitPrice
+            ? ` at $${limitPrice.toFixed(2)} limit`
+            : ' at market';
       return {
-        text: `I'll place a paper **${intent.type.toUpperCase()}** order for **${qty} × ${symbol}**${priceStr}.\n\nThis is a paper order — no real money is involved. Confirm below to submit it to your Alpaca paper account.`,
+        text:
+          orderType === 'option'
+            ? `I'll place a paper **${intent.type.toUpperCase()}** options order: **${qty} × ${optionSymbol}**${priceStr}.\n\nOptions are limit-only on Alpaca. This is a paper order — no real money is involved.`
+            : `I'll place a paper **${intent.type.toUpperCase()}** order for **${qty} × ${symbol}**${priceStr}.\n\nThis is a paper order — no real money is involved. Confirm below to submit it to your Alpaca paper account.`,
         orderPreview: preview,
       };
     }
@@ -371,11 +389,12 @@ export function ChatPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({
-          symbol: preview.symbol,
+          symbol: preview.orderType === 'option' ? preview.symbol.replace(/(?=\d{6}[CP]).*$/, '') : preview.symbol,
           side: preview.side,
           qty: preview.qty,
           orderType: preview.orderType,
           limitPrice: preview.limitPrice ?? null,
+          optionSymbol: preview.orderType === 'option' ? preview.symbol : null,
           idempotencyKey: crypto.randomUUID(),
         }),
       });

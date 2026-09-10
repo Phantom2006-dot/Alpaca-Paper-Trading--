@@ -313,14 +313,17 @@ export const placeManualTradeBodySymbolMax = 10;
 
 export const placeManualTradeBodyQtyExclusiveMin = 0;
 
+export const placeManualTradeBodyOptionSymbolMax = 30;
+
 
 
 export const PlaceManualTradeBody = zod.object({
   "symbol": zod.string().min(1).max(placeManualTradeBodySymbolMax),
   "side": zod.enum(['buy', 'sell']),
   "qty": zod.number().gt(placeManualTradeBodyQtyExclusiveMin),
-  "orderType": zod.enum(['market', 'limit']),
+  "orderType": zod.enum(['market', 'limit', 'option']).describe('option places an options contract order; symbol must be the OCC contract symbol passed in optionSymbol.'),
   "limitPrice": zod.number().nullish(),
+  "optionSymbol": zod.string().max(placeManualTradeBodyOptionSymbolMax).nullish().describe('OCC option contract symbol, required when orderType=option (e.g. SPY250919C00500000).'),
   "idempotencyKey": zod.string().nullish()
 })
 
@@ -445,6 +448,86 @@ export const QueryPowerXBody = zod.object({
 
 export const QueryPowerXResponse = zod.object({
   "reply": zod.string()
+})
+
+
+/**
+ * Returns recent OHLCV bars for a symbol. When feed=auto, feeds are tried in order (iex, sip, delayed_sip) until one returns data; the feed actually used is reported.
+ * @summary OHLCV bars for charting
+ */
+export const getMarketBarsQuerySymbolMax = 12;
+
+export const getMarketBarsQueryTimeframeDefault = `1Day`;
+export const getMarketBarsQueryFeedDefault = `auto`;
+export const getMarketBarsQueryLimitDefault = 120;
+export const getMarketBarsQueryLimitMax = 500;
+
+
+
+export const GetMarketBarsQueryParams = zod.object({
+  "symbol": zod.coerce.string().min(1).max(getMarketBarsQuerySymbolMax),
+  "timeframe": zod.enum(['1Min', '5Min', '15Min', '1Hour', '1Day']).default(getMarketBarsQueryTimeframeDefault),
+  "feed": zod.enum(['auto', 'iex', 'sip', 'delayed_sip']).default(getMarketBarsQueryFeedDefault),
+  "limit": zod.coerce.number().max(getMarketBarsQueryLimitMax).default(getMarketBarsQueryLimitDefault)
+})
+
+export const GetMarketBarsResponse = zod.object({
+  "symbol": zod.string(),
+  "timeframe": zod.string(),
+  "feed": zod.string().describe('The feed that actually produced the bars (auto resolves through the fallback order).'),
+  "bars": zod.array(zod.object({
+  "t": zod.string().nullish(),
+  "o": zod.number(),
+  "h": zod.number(),
+  "l": zod.number(),
+  "c": zod.number(),
+  "v": zod.number()
+}))
+})
+
+
+/**
+ * Lists the most recent upstream bar fetch failures and the feed fallback order, so empty charts and scans can be explained.
+ * @summary Recent market-data fetch diagnostics
+ */
+export const GetMarketDataDiagnosticsResponse = zod.object({
+  "checkedAt": zod.string(),
+  "feedOrder": zod.array(zod.string()),
+  "recent": zod.array(zod.object({
+  "at": zod.string(),
+  "host": zod.string(),
+  "status": zod.number().nullish(),
+  "message": zod.string(),
+  "feed": zod.string().nullish()
+}))
+})
+
+
+/**
+ * Returns listed US equity/ETF option contracts (OCC symbols) for the underlying from Alpaca's options market data. Requires Alpaca credentials.
+ * @summary Option chain snapshot for an underlying
+ */
+export const getOptionChainPathUnderlyingMax = 8;
+
+
+
+export const GetOptionChainParams = zod.object({
+  "underlying": zod.coerce.string().min(1).max(getOptionChainPathUnderlyingMax)
+})
+
+export const GetOptionChainResponse = zod.object({
+  "underlying": zod.string(),
+  "count": zod.number(),
+  "contracts": zod.array(zod.object({
+  "occSymbol": zod.string(),
+  "strike": zod.number(),
+  "expiry": zod.string(),
+  "type": zod.enum(['call', 'put']),
+  "bid": zod.number().nullish(),
+  "ask": zod.number().nullish(),
+  "openInterest": zod.number().nullish(),
+  "delta": zod.number().nullish()
+}))
 })
 
 

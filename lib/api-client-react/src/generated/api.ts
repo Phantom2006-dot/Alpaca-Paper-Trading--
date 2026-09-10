@@ -30,11 +30,15 @@ import type {
   ErrorResponse,
   FlattenResult,
   GetAgentAssetsParams,
+  GetMarketBarsParams,
   HealthStatus,
   ManualTradeInput,
   ManualTradeResult,
+  MarketBars,
+  MarketDataDiagnostics,
   OptimizationResult,
   OptimizeBacktestInput,
+  OptionChain,
   PowerXInput,
   PowerXResult,
   RunStrategyInput,
@@ -1046,6 +1050,247 @@ export const useQueryPowerX = <TError = ErrorType<ErrorResponse>,
       > => {
       return useMutation(getQueryPowerXMutationOptions(options));
     }
+
+export const getGetMarketBarsUrl = (params: GetMarketBarsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/agent/bars?${stringifiedParams}` : `/api/agent/bars`
+}
+
+/**
+ * Returns recent OHLCV bars for a symbol. When feed=auto, feeds are tried in order (iex, sip, delayed_sip) until one returns data; the feed actually used is reported.
+ * @summary OHLCV bars for charting
+ */
+export const getMarketBars = async (params: GetMarketBarsParams, options?: Parameters<typeof customFetch>[1]): Promise<MarketBars> => {
+
+  return customFetch<MarketBars>(getGetMarketBarsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMarketBarsQueryKey = (params?: GetMarketBarsParams,) => {
+    return [
+    `/api/agent/bars`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetMarketBarsQueryOptions = <TData = Awaited<ReturnType<typeof getMarketBars>>, TError = ErrorType<ErrorResponse>>(params: GetMarketBarsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMarketBars>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMarketBarsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMarketBars>>> = ({ signal }) => getMarketBars(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMarketBars>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMarketBarsQueryResult = NonNullable<Awaited<ReturnType<typeof getMarketBars>>>
+export type GetMarketBarsQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary OHLCV bars for charting
+ */
+
+export function useGetMarketBars<TData = Awaited<ReturnType<typeof getMarketBars>>, TError = ErrorType<ErrorResponse>>(
+ params: GetMarketBarsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMarketBars>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMarketBarsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetMarketDataDiagnosticsUrl = () => {
+
+
+
+
+  return `/api/agent/diagnostics/market-data`
+}
+
+/**
+ * Lists the most recent upstream bar fetch failures and the feed fallback order, so empty charts and scans can be explained.
+ * @summary Recent market-data fetch diagnostics
+ */
+export const getMarketDataDiagnostics = async ( options?: Parameters<typeof customFetch>[1]): Promise<MarketDataDiagnostics> => {
+
+  return customFetch<MarketDataDiagnostics>(getGetMarketDataDiagnosticsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMarketDataDiagnosticsQueryKey = () => {
+    return [
+    `/api/agent/diagnostics/market-data`
+    ] as const;
+    }
+
+
+export const getGetMarketDataDiagnosticsQueryOptions = <TData = Awaited<ReturnType<typeof getMarketDataDiagnostics>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMarketDataDiagnostics>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMarketDataDiagnosticsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMarketDataDiagnostics>>> = ({ signal }) => getMarketDataDiagnostics({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMarketDataDiagnostics>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMarketDataDiagnosticsQueryResult = NonNullable<Awaited<ReturnType<typeof getMarketDataDiagnostics>>>
+export type GetMarketDataDiagnosticsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Recent market-data fetch diagnostics
+ */
+
+export function useGetMarketDataDiagnostics<TData = Awaited<ReturnType<typeof getMarketDataDiagnostics>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMarketDataDiagnostics>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMarketDataDiagnosticsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetOptionChainUrl = (underlying: string,) => {
+
+
+
+
+  return `/api/agent/options/${underlying}`
+}
+
+/**
+ * Returns listed US equity/ETF option contracts (OCC symbols) for the underlying from Alpaca's options market data. Requires Alpaca credentials.
+ * @summary Option chain snapshot for an underlying
+ */
+export const getOptionChain = async (underlying: string, options?: Parameters<typeof customFetch>[1]): Promise<OptionChain> => {
+
+  return customFetch<OptionChain>(getGetOptionChainUrl(underlying),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetOptionChainQueryKey = (underlying: string,) => {
+    return [
+    `/api/agent/options/${underlying}`
+    ] as const;
+    }
+
+
+export const getGetOptionChainQueryOptions = <TData = Awaited<ReturnType<typeof getOptionChain>>, TError = ErrorType<ErrorResponse>>(underlying: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOptionChain>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetOptionChainQueryKey(underlying);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getOptionChain>>> = ({ signal }) => getOptionChain(underlying, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: underlying !== null && underlying !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getOptionChain>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetOptionChainQueryResult = NonNullable<Awaited<ReturnType<typeof getOptionChain>>>
+export type GetOptionChainQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Option chain snapshot for an underlying
+ */
+
+export function useGetOptionChain<TData = Awaited<ReturnType<typeof getOptionChain>>, TError = ErrorType<ErrorResponse>>(
+ underlying: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getOptionChain>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetOptionChainQueryOptions(underlying,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetTradeSuggestionsUrl = () => {
 

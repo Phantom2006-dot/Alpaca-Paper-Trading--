@@ -382,6 +382,62 @@ export interface SymbolSnapshot {
   cluster: string | null;
 }
 
+export interface OhlcvBar {
+  t?: string | null;
+  o: number;
+  h: number;
+  l: number;
+  c: number;
+  v: number;
+}
+
+export interface MarketBars {
+  symbol: string;
+  timeframe: string;
+  /** The feed that actually produced the bars (auto resolves through the fallback order). */
+  feed: string;
+  bars: OhlcvBar[];
+}
+
+export interface MarketDataDiagnosticEntry {
+  at: string;
+  host: string;
+  status?: number | null;
+  message: string;
+  feed?: string | null;
+}
+
+export interface MarketDataDiagnostics {
+  checkedAt: string;
+  feedOrder: string[];
+  recent: MarketDataDiagnosticEntry[];
+}
+
+export type OptionContractType = typeof OptionContractType[keyof typeof OptionContractType];
+
+
+export const OptionContractType = {
+  call: 'call',
+  put: 'put',
+} as const;
+
+export interface OptionContract {
+  occSymbol: string;
+  strike: number;
+  expiry: string;
+  type: OptionContractType;
+  bid?: number | null;
+  ask?: number | null;
+  openInterest?: number | null;
+  delta?: number | null;
+}
+
+export interface OptionChain {
+  underlying: string;
+  count: number;
+  contracts: OptionContract[];
+}
+
 export type StrategyActivityStatus = typeof StrategyActivityStatus[keyof typeof StrategyActivityStatus];
 
 
@@ -551,12 +607,16 @@ export const ManualTradeInputSide = {
   sell: 'sell',
 } as const;
 
+/**
+ * option places an options contract order; symbol must be the OCC contract symbol passed in optionSymbol.
+ */
 export type ManualTradeInputOrderType = typeof ManualTradeInputOrderType[keyof typeof ManualTradeInputOrderType];
 
 
 export const ManualTradeInputOrderType = {
   market: 'market',
   limit: 'limit',
+  option: 'option',
 } as const;
 
 export interface ManualTradeInput {
@@ -568,8 +628,14 @@ export interface ManualTradeInput {
   side: ManualTradeInputSide;
   /** @exclusiveMinimum 0 */
   qty: number;
+  /** option places an options contract order; symbol must be the OCC contract symbol passed in optionSymbol. */
   orderType: ManualTradeInputOrderType;
   limitPrice?: number | null;
+  /**
+     * OCC option contract symbol, required when orderType=option (e.g. SPY250919C00500000).
+     * @maxLength 30
+     */
+  optionSymbol?: string | null;
   idempotencyKey?: string | null;
 }
 
@@ -630,4 +696,39 @@ export type GetAgentAssetsParams = {
  */
 search?: string;
 };
+
+export type GetMarketBarsParams = {
+/**
+ * @minLength 1
+ * @maxLength 12
+ */
+symbol: string;
+timeframe?: GetMarketBarsTimeframe;
+feed?: GetMarketBarsFeed;
+/**
+ * @maximum 500
+ */
+limit?: number;
+};
+
+export type GetMarketBarsTimeframe = typeof GetMarketBarsTimeframe[keyof typeof GetMarketBarsTimeframe];
+
+
+export const GetMarketBarsTimeframe = {
+  '1Min': '1Min',
+  '5Min': '5Min',
+  '15Min': '15Min',
+  '1Hour': '1Hour',
+  '1Day': '1Day',
+} as const;
+
+export type GetMarketBarsFeed = typeof GetMarketBarsFeed[keyof typeof GetMarketBarsFeed];
+
+
+export const GetMarketBarsFeed = {
+  auto: 'auto',
+  iex: 'iex',
+  sip: 'sip',
+  delayed_sip: 'delayed_sip',
+} as const;
 

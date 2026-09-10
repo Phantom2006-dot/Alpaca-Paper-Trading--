@@ -22,11 +22,43 @@ import {
 
 type Bar = {
   timestamp?: string;
+  open?: number;
   close: number;
   high: number;
   low: number;
   volume: number;
 };
+
+// ─── MARKET-DATA DIAGNOSTICS ─────────────────────────────────────────────────
+// Every upstream bar-fetch failure is recorded here so the UI can explain
+// empty charts / "insufficient_data" regimes instead of failing silently.
+const marketDataLog: Array<{
+  at: string;
+  host: string;
+  status: number | null;
+  message: string;
+  feed: string | null;
+}> = [];
+
+function recordMarketDataFailure(error: unknown, feed: string | null): void {
+  const err = error as { message?: string; status?: number };
+  marketDataLog.unshift({
+    at: new Date().toISOString(),
+    host: "data.alpaca.markets",
+    status: typeof err?.status === "number" ? err.status : null,
+    message: (err?.message ?? String(error)).slice(0, 300),
+    feed,
+  });
+  if (marketDataLog.length > 25) marketDataLog.length = 25;
+}
+
+export function getMarketDataDiagnostics() {
+  return {
+    checkedAt: new Date().toISOString(),
+    feedOrder: ["iex", "sip", "delayed_sip"],
+    recent: marketDataLog.slice(0, 10),
+  };
+}
 
 export type Timeframe = "1Min" | "5Min" | "15Min" | "1Hour" | "1Day";
 export type DataFeed = "iex" | "sip" | "delayed_sip";
@@ -486,7 +518,12 @@ function demoBars(symbol: string): Bar[] {
     const pulse = Math.sin(index * 0.09 + seed * 0.3) * 0.8;
     const close = base + cycle + pulse + index * 0.02;
     const range = 0.7 + Math.abs(Math.sin(index + seed)) * 0.55;
+    // Synthetic bars always cover the full indicator window (>= 22 closes for
+    // the 20-bar SMA/ADX warm-up) so demo mode never reports "insufficient data".
+    const open = index === 0 ? close : close - (cycle - Math.sin((index - 1) * 0.33 + seed) * 2.8);
     return {
+      timestamp: new Date(Date.now() - (59 - index) * 86_400_000).toISOString(),
+      open,
       close,
       high: close + range,
       low: close - range,
@@ -534,15 +571,15 @@ async function alpacaRequest<T>(
   return (await response.json()) as T;
 }
 
-async function fetchBars(
+async function fetchBarsWithFeed(
   symbol: string,
-  timeframe: Timeframe = "1Day",
-  feed: DataFeed = "iex",
+  timeframe: Timeframe,
+  feed: DataFeed,
+  limit: number,
 ): Promise<Bar[]> {
-  if (!hasCredentials()) return demoBars(symbol);
   const query = new URLSearchParams({
     timeframe,
-    limit: "60",
+    limit: String(limit),
     feed,
     sort: "asc",
   });
@@ -557,17 +594,136 @@ async function fetchBars(
   );
   if (!response.ok) {
     const message = await response.text();
-    throw new Error(`Market data ${response.status}: ${message.slice(0, 300)}`);
+    const error = new Error(`Market data ${response.status} (feed=${feed}): ${message.slice(0, 300)}`) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
   }
   const payload = (await response.json()) as {
-    bars?: Array<{ c: number; h: number; l: number; v: number }>;
+    bars?: Array<{ t?: string; o?: number; c: number; h: number; l: number; v: number }>;
   };
   return (payload.bars ?? []).map((bar) => ({
+    timestamp: bar.t,
+    open: bar.o !== undefined ? toNumber(bar.o) : undefined,
     close: toNumber(bar.c),
     high: toNumber(bar.h),
     low: toNumber(bar.l),
     volume: toNumber(bar.v),
   }));
+}
+
+/**
+ * Fetch bars with feed fallback. The free plan's `iex` feed frequently
+ * returns zero bars for illiquid names or outside market hours, which used
+ * to surface as a bare "insufficient_data" regime with no explanation.
+ * `feed=auto` now walks the fallback order and records every upstream failure
+ * so diagnostics can show exactly why data is missing.
+ */
+async function fetchBars(
+  symbol: string,
+  timeframe: Timeframe = "1Day",
+  feed: DataFeed | "auto" = "auto",
+  limit = 60,
+): Promise<Bar[]> {
+  if (!hasCredentials()) return demoBars(symbol);
+  const feedOrder: DataFeed[] = feed === "auto" ? ["iex", "sip", "delayed_sip"] : [feed];
+  let lastError: unknown = null;
+  for (const candidate of feedOrder) {
+    try {
+      const bars = await fetchBarsWithFeed(symbol, timeframe, candidate, limit);
+      if (bars.length > 0) return bars;
+      lastError = new Error(`feed=${candidate} returned zero bars`);
+      recordMarketDataFailure(lastError, candidate);
+    } catch (error) {
+      lastError = error;
+      recordMarketDataFailure(error, candidate);
+    }
+  }
+  if (feed === "auto") return []; // scanners treat empty as honest "no data"
+  throw lastError instanceof Error ? lastError : new Error("Market data unavailable");
+}
+
+/** OHLCV chart data for the UI. Tries each feed until one returns bars. */
+export async function getMarketBars(
+  symbol: string,
+  timeframe: Timeframe = "1Day",
+  feed: DataFeed | "auto" = "auto",
+  limit = 120,
+): Promise<{ symbol: string; timeframe: string; feed: string; bars: Bar[] }> {
+  const normalized = symbol.trim().toUpperCase();
+  if (!normalized) throw new Error("Symbol is required.");
+  if (!hasCredentials()) {
+    return { symbol: normalized, timeframe, feed: "demo", bars: demoBars(normalized).slice(-limit) };
+  }
+  const feedOrder: DataFeed[] = feed === "auto" ? ["iex", "sip", "delayed_sip"] : [feed];
+  for (const candidate of feedOrder) {
+    try {
+      const bars = await fetchBarsWithFeed(normalized, timeframe, candidate, limit);
+      if (bars.length > 0) return { symbol: normalized, timeframe, feed: candidate, bars };
+      recordMarketDataFailure(new Error(`feed=${candidate} returned zero bars`), candidate);
+    } catch (error) {
+      recordMarketDataFailure(error, candidate);
+    }
+  }
+  return { symbol: normalized, timeframe, feed: "none", bars: [] };
+}
+
+/**
+ * Option chain snapshot (US equity/ETF options, OCC symbols) from Alpaca's
+ * options market data. Available in the paper environment by default per
+ * Alpaca's options-trading docs. Requires credentials.
+ */
+export async function getOptionChain(underlying: string) {
+  if (!hasCredentials()) {
+    throw new Error("Alpaca credentials are required to view option chains. Add them on the Credentials page.");
+  }
+  const sym = underlying.trim().toUpperCase();
+  if (!sym) throw new Error("Underlying symbol is required.");
+  const response = await fetch(
+    `${MARKET_DATA_URL.replace("data.alpaca.markets", "data.alpaca.markets")}/v1beta1/options/snapshots/${encodeURIComponent(sym)}?limit=100`,
+    {
+      headers: {
+        "APCA-API-KEY-ID": getAlpacaCredentials().apiKey,
+        "APCA-API-SECRET-KEY": getAlpacaCredentials().apiSecret,
+      },
+    },
+  );
+  if (!response.ok) {
+    const message = await response.text();
+    const error = new Error(`Options data ${response.status}: ${message.slice(0, 300)}`) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
+  }
+  const payload = (await response.json()) as {
+    snapshots?: Array<{
+      symbol?: string;
+      greeks?: { delta?: number };
+      latest_quote?: { bid?: number; ask?: number };
+      latest_trade?: { p?: number };
+    }>;
+  };
+  // OCC format: UNDERLYING + YYMMDD + C/P + strike*1000 (8 digits)
+  const occRe = /^([A-Z]+)(\d{6})([CP])(\d{8})$/;
+  const contracts = (payload.snapshots ?? [])
+    .map((snap) => {
+      const occ = snap.symbol ?? "";
+      const m = occRe.exec(occ);
+      if (!m) return null;
+      const yymmdd = m[2];
+      const expiry = `20${yymmdd.slice(0, 2)}-${yymmdd.slice(2, 4)}-${yymmdd.slice(4, 6)}`;
+      return {
+        occSymbol: occ,
+        strike: Number(m[4]) / 1000,
+        expiry,
+        type: m[3] === "C" ? ("call" as const) : ("put" as const),
+        bid: snap.latest_quote?.bid ?? null,
+        ask: snap.latest_quote?.ask ?? null,
+        openInterest: null,
+        delta: snap.greeks?.delta ?? null,
+      };
+    })
+    .filter((c): c is NonNullable<typeof c> => c !== null)
+    .sort((a, b) => a.expiry.localeCompare(b.expiry) || a.strike - b.strike);
+  return { underlying: sym, count: contracts.length, contracts };
 }
 
 async function fetchHistoricalBars(
@@ -1442,15 +1598,41 @@ export async function placeManualTrade(
   symbol: string,
   side: "buy" | "sell",
   qty: number,
-  orderType: "market" | "limit",
+  orderType: "market" | "limit" | "option",
   limitPrice: number | null | undefined,
   idempotencyKey: string | null | undefined,
+  optionSymbol?: string | null | undefined,
 ) {
   const sym = symbol.trim().toUpperCase();
   checkIdempotency(idempotencyKey ?? undefined);
   let orderId: string | null = null;
   let status: "submitted" | "simulated" = "simulated";
   if (hasCredentials()) {
+    // Options orders target the OCC contract directly and always require a
+    // limit price per Alpaca's options-trading API.
+    if (orderType === "option") {
+      const occ = (optionSymbol ?? (sym.includes("C") || sym.includes("P") ? sym : "")).trim().toUpperCase();
+      if (!occ || !/^([A-Z]+)(\d{6})([CP])(\d{8})$/.test(occ)) {
+        throw new Error("A valid OCC option symbol (e.g. SPY250919C00500000) is required for an options order.");
+      }
+      if (limitPrice == null) {
+        throw new Error("Options orders require a limit price — Alpaca does not accept market orders for options.");
+      }
+      const order = await alpacaRequest<{ id: string }>("/v2/orders", {
+        method: "POST",
+        body: JSON.stringify({
+          symbol: occ,
+          qty: String(qty),
+          side,
+          type: "limit",
+          time_in_force: "day",
+          limit_price: String(limitPrice),
+          client_order_id: idempotencyKey ?? randomUUID(),
+        }),
+      });
+      orderId = order.id;
+      status = "submitted";
+    } else {
     const body: Record<string, string> = {
       symbol: sym,
       qty: String(qty),
@@ -1468,6 +1650,7 @@ export async function placeManualTrade(
     });
     orderId = order.id;
     status = "submitted";
+    }
   } else {
     // demo mode — update in-memory position
     const bars = demoBars(sym);
