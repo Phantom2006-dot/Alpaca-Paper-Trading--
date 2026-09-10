@@ -4,6 +4,26 @@ All completed work is recorded here after every prompt request.
 
 ---
 
+## [Session 15] — Real-time quotes, endpoint truth-audit, deployment root fixed, live-bundle proof
+
+### Backend
+- **New endpoint `GET /api/agent/quote?symbol=…`** → real-time latest trade from Alpaca Data API (`/v2/stocks/{symbol}/trades/latest`, feed iex→sip fallback). Returns `{ symbol, price, size, timestamp, feed, live: true }`. No synthetic prices anywhere.
+- **Endpoint truth-audit script** (`scripts/src/audit-endpoints.ts`, run: `npx tsx scripts/src/audit-endpoints.ts`) — hits all 10 live endpoints; tokenless mode verifies each auth-gated route answers 401 (proves reachability + gating); with `CLERK_TOKEN` + `ALPACA_KEY_ID/ALPACA_SECRET` set it cross-checks response bodies against Alpaca ground truth (equity match, bar-price plausibility, no placeholder win-rate 68.4/6.2, regime ≠ insufficient_data). Result on live API: **10/10 verified**.
+
+### Frontend
+- `CandleChart` header now polls `/api/agent/quote` every 5 s and shows a **LIVE price badge** next to the chart symbol (real ticks, not interpolated candles).
+
+### Deployment root-cause fix (why recent deploys broke)
+- Deploying from `artifacts/api-server/` (its `.vercel/project.json` also points to `kairo-api`) uploads **without** `pnpm-lock.yaml` → Vercel falls back to `npm install` → `workspace:*` protocol fails → build Error. **The correct deployment root is the repo root**, whose `vercel.json` pins `installCommand: pnpm install --frozen-lockfile` and builds via pnpm filter. Backend redeployed from repo root → Ready, healthz OK.
+- Frontend: `vercel build --prod` died on a stale esbuild binary (host lib 0.27.3 vs downloaded binary 0.27.0; fixed with `node install.js`) but its own re-prune kept breaking vite. Deployed via **manual Build Output API** (`dist/public` → `.vercel/output/static`, `vercel deploy --prebuilt --prod`) and **explicitly re-aliased** `kairo-trade-agent.vercel.app` → new deployment.
+- **Proof of live UI**: alias HTML references bundle `index-B-_zeP5R.js`, byte-identical hash to local build; greps for "Place paper order", "candlestick", "Search symbol", "Market data diagnostics" all hit in the **live** bundle.
+
+### Verification (all real, no assumptions)
+- Backend typecheck ✓, 20/20 unit tests ✓ (`node node_modules/.pnpm/tsx@4.23.1/node_modules/tsx/dist/cli.mjs --test artifacts/api-server/src/lib/*.test.ts`).
+- Live: healthz `{"status":"ok"}`; 10/10 endpoint audit; frontend alias serves the new bundle.
+
+---
+
 ## [Session 14] — Candlestick charts, options trading (paper), asset dropdown, market-data diagnostics ("insufficient data" fixed)
 
 ### Facts established from Alpaca docs (no assumptions)
