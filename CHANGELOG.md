@@ -4,6 +4,32 @@ All completed work is recorded here after every prompt request.
 
 ---
 
+## [Session 14] — Candlestick charts, options trading (paper), asset dropdown, market-data diagnostics ("insufficient data" fixed)
+
+### Facts established from Alpaca docs (no assumptions)
+- **Options**: paper trading supports options **by default** (docs.alpaca.markets/us/docs/options-trading: "In the Paper environment, options trading capability will be enabled by default"). Data via `data.alpaca.markets/v1beta1/options/snapshots/{underlying}`; orders via `/v2/orders` with the **OCC contract symbol** and **limit type only** (no market orders for options).
+- **Futures**: Alpaca offers **no futures at all** (their forum/roadmap confirms) — nothing to integrate; stocks/ETFs were already covered.
+- **Bars endpoint**: `limit` accepts 1–10000 (default 1000) — the old hard-coded 60-bar fetch was a self-imposed limitation, now configurable.
+
+### "Insufficient data" — root cause + fix
+- The scanner's `regime: insufficient_data` fired whenever `bars.length < 22` (20-bar SMA/ADX warm-up). With `feed=iex` (free plan) many symbols return **zero bars** outside market hours / for non-IEX-covered names → the regime showed "insufficient data" with no explanation.
+- **Fix**: `fetchBars/getMarketBars` now default to `feed=auto` and walk the fallback order **iex → sip → delayed_sip**, returning the first feed with data (and reporting which feed was used). Every upstream failure is recorded in a diagnostics ring buffer.
+- **New endpoint** `GET /api/agent/diagnostics/market-data` — recent fetch failures + feed order, so empty charts/scans are explainable instead of mysterious.
+
+### Candlestick charts (TradingView-style, new)
+- `GET /api/agent/bars?symbol&timeframe&feed&limit` returns OHLCV (open now captured too).
+- New `CandleChart.tsx` component: pure-SVG candles + volume columns, price grid, sparse time axis, feed badge, 1min/5min/15min/1hour/1day selector, 60s auto-refresh, honest empty-state pointing at diagnostics. Embedded at the top of the AI Console.
+
+### Options trading (paper) + asset selection
+- **Option chain panel** on the Console: `GET /api/agent/options/{underlying}` parses OCC symbols into strike/expiry/type with bid/ask/Δ from snapshots.
+- **Option orders**: `orderType: "option"` on `POST /agent/trade` (OCC symbol + limit price enforced; demo mode politely refuses). Chat parser now recognizes OCC contracts: `buy 1 SPY250919C00500000 at 1.25` → confirm card → real paper options order.
+- **Asset search dropdown** in the Console controls: searches the real Alpaca `/v2/assets` universe (all stocks & ETFs) and clicking a result switches the pipeline/chart to it.
+
+### Validation / deploy
+- Codegen clean; API typecheck clean; 20/20 tests; frontend typecheck + build clean. Backend + frontend redeployed. Commit `84238d7`.
+
+---
+
 ## [Session 13] — User confirmed DB persistence works; safest-trade advisor shipped; dummy metrics removed
 
 ### Verified by the user in the live app
