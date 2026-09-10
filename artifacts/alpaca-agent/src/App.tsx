@@ -79,6 +79,10 @@ import type {
   TradableAsset,
 } from '@workspace/api-client-react';
 import { Link, Route, Switch, Router as WouterRouter, useLocation } from 'wouter';
+import { CandleChart } from '@/components/CandleChart';
+import { OrderTicket } from '@/components/OrderTicket';
+import { usePlaceManualTrade, useGetMarketDataDiagnostics } from '@workspace/api-client-react';
+import type { GetMarketBarsTimeframe } from '@workspace/api-client-react';
 import { ConsolePage } from '@/pages/ConsolePage';
 import { AuditPage } from '@/pages/AuditPage';
 import { RiskPage } from '@/pages/RiskPage';
@@ -634,6 +638,9 @@ function SymbolDetail({ symbol, onClose }: { symbol: string; onClose: () => void
           <div className="detail-stat-grid">
             <div><span>SMA</span><strong>${snapshot.sma.toFixed(2)}</strong></div><div><span>Std dev</span><strong>{snapshot.stddev.toFixed(3)}</strong></div><div><span>Z-score</span><strong>{z(snapshot.zScore)}</strong></div><div><span>ADX</span><strong>{snapshot.adx.toFixed(1)}</strong></div><div><span>Vol ratio</span><strong>{snapshot.volumeRatio.toFixed(2)}x</strong></div><div><span>Unrealized</span><strong className={snapshot.unrealizedPnl >= 0 ? 'text-primary' : 'text-destructive'}>{money(snapshot.unrealizedPnl)}</strong></div>
           </div>
+          <div style={{ margin: '12px -16px' }}>
+            <CandleChart symbol={symbol} timeframe="1Day" />
+          </div>
           <div className="detail-explain"><div className="eyebrow">Decision trace</div><p>{snapshot.tradeBlockedReason || `Signal ${statusLabel(snapshot.signal)} with ${statusLabel(snapshot.regime)} regime. All available indicators are visible for review.`}</p></div>
           <div className="mt-auto pt-5 font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground">Updated {formatDateTime(snapshot.updatedAt)}</div>
         </>
@@ -724,6 +731,19 @@ function DashboardPage() {
         <div className="space-y-5">
           <AccountStrip account={dashboard.account} />
           <MetricRail metrics={dashboard.metrics} />
+          <CandleChart symbol={selectedSymbol || 'SPY'} timeframe="1Day" />
+          <div className="panel">
+            <div className="card-header">
+              <div>
+                <div className="eyebrow">place a paper order</div>
+                <h3 className="card-title">Order ticket</h3>
+              </div>
+            </div>
+            <div style={{ padding: '0 16px 16px' }}>
+              <DashboardOrderTicket />
+            </div>
+          </div>
+          <MarketDataDiagnosticsPanel />
           <div className="dashboard-grid">
             <AgentStatusCard
               status={dashboard.status}
@@ -746,6 +766,81 @@ function DashboardPage() {
         </div>
       )}
     </>
+  );
+}
+
+function DashboardOrderTicket() {
+  const queryClient = useQueryClient();
+  const placeTrade = usePlaceManualTrade();
+  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
+  return (
+    <div>
+      <OrderTicket
+        pending={placeTrade.isPending}
+        onSubmit={(draft) => {
+          setNotice(null);
+          placeTrade.mutate(
+            {
+              data: {
+                symbol: draft.symbol,
+                side: draft.side,
+                qty: draft.qty,
+                orderType: draft.orderType,
+                limitPrice: draft.limitPrice ?? null,
+                idempotencyKey: crypto.randomUUID(),
+              } as any,
+            },
+            {
+              onSuccess: (result) => {
+                setNotice({ ok: true, text: result.message });
+                queryClient.invalidateQueries({ queryKey: getGetAgentAccountQueryKey() });
+                queryClient.invalidateQueries({ queryKey: getGetAgentDashboardQueryKey() });
+              },
+              onError: (error) => {
+                setNotice({ ok: false, text: error instanceof Error ? error.message : 'Order failed.' });
+              },
+            },
+          );
+        }}
+      />
+      {notice && (
+        <p style={{ marginTop: 8, fontSize: 12, color: notice.ok ? '#22c55e' : '#f59e0b' }}>
+          {notice.ok ? '✓ ' : '⚠ '}{notice.text}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function MarketDataDiagnosticsPanel() {
+  const diagQuery = useGetMarketDataDiagnostics({ query: { queryKey: ['market-data-diagnostics'], staleTime: 30_000 } });
+  const diag = diagQuery.data;
+  if (!diag) return null;
+  return (
+    <div className="panel" data-testid="panel-market-data-diagnostics">
+      <div className="card-header">
+        <div>
+          <div className="eyebrow">data honesty</div>
+          <h3 className="card-title">Market data diagnostics</h3>
+        </div>
+        <span style={{ fontSize: 11, color: '#8b93a7' }}>
+          feed order: {diag.feedOrder.join(' → ')} · {diag.recent.length} recent issues
+        </span>
+      </div>
+      {diag.recent.length === 0 ? (
+        <p style={{ padding: '0 16px 16px', fontSize: 12, color: '#22c55e' }}>
+          ✓ No market-data failures recorded — every bar you see came from a live feed.
+        </p>
+      ) : (
+        <div style={{ padding: '0 16px 16px', display: 'grid', gap: 6 }}>
+          {diag.recent.map((entry, i) => (
+            <div key={i} style={{ fontSize: 11.5, color: '#f59e0b', borderTop: i === 0 ? 'none' : '1px solid rgba(148,163,184,0.08)', paddingTop: i === 0 ? 0 : 6 }}>
+              [{new Date(entry.at).toLocaleTimeString()}] {entry.host}{entry.feed ? ` (feed=${entry.feed})` : ''} — {entry.message}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

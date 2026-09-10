@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '@clerk/react';
+import { OrderTicket, type OrderDraft } from '../components/OrderTicket';
 import {
   useGetAgentAccount, useGetAgentStatus, useGetTradeSuggestions,
   getGetAgentAccountQueryKey, getGetAgentStatusQueryKey, getGetTradeSuggestionsQueryKey,
@@ -481,6 +482,16 @@ export function ChatPage() {
         >
           <Send size={15} />
         </button>
+      </div>
+
+      {/* Order ticket: searchable symbol list from the real Alpaca /v2/assets universe */}
+      <div style={{ padding: '0 16px 12px' }}>
+        <OrderTicket
+          onSubmit={(draft: OrderDraft) => {
+            const draftText = `${draft.side} ${draft.qty} ${draft.symbol}${draft.orderType === 'limit' ? ` at ${draft.limitPrice}` : ''}`;
+            send(draftText);
+          }}
+        />
       </div>
     </div>
   );
