@@ -399,6 +399,16 @@ export interface MarketBars {
   bars: OhlcvBar[];
 }
 
+export interface LatestQuote {
+  symbol: string;
+  price?: number | null;
+  size?: number | null;
+  timestamp?: string | null;
+  feed: string;
+  /** false in demo mode (no real Alpaca data source). */
+  live: boolean;
+}
+
 export interface MarketDataDiagnosticEntry {
   at: string;
   host: string;
@@ -731,4 +741,12 @@ export const GetMarketBarsFeed = {
   sip: 'sip',
   delayed_sip: 'delayed_sip',
 } as const;
+
+export type GetLatestQuoteParams = {
+/**
+ * @minLength 1
+ * @maxLength 12
+ */
+symbol: string;
+};
 

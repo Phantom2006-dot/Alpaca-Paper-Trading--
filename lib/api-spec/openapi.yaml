@@ -341,6 +341,39 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /agent/quote:
+    get:
+      operationId: getLatestQuote
+      tags: [agent]
+      summary: Latest trade for a symbol (real-time poll endpoint)
+      description: Returns the most recent trade from Alpaca's market data. Frontend polls this every few seconds for a live price — WebSocket streaming is not viable on serverless, so this is the honest real-time mechanism.
+      parameters:
+        - name: symbol
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 12
+      responses:
+        "200":
+          description: Latest trade (bars may still be empty in demo mode)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LatestQuote"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Alpaca market data unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /agent/diagnostics/market-data:
     get:
       operationId: getMarketDataDiagnostics
@@ -948,6 +981,26 @@ components:
           items:
             $ref: "#/components/schemas/OhlcvBar"
       required: [symbol, timeframe, feed, bars]
+    LatestQuote:
+      type: object
+      properties:
+        symbol:
+          type: string
+        price:
+          type: number
+          nullable: true
+        size:
+          type: number
+          nullable: true
+        timestamp:
+          type: string
+          nullable: true
+        feed:
+          type: string
+        live:
+          type: boolean
+          description: false in demo mode (no real Alpaca data source).
+      required: [symbol, feed, live]
     MarketDataDiagnosticEntry:
       type: object
       properties:

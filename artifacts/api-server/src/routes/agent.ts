@@ -13,6 +13,7 @@ import {
 
 import {
   flattenPositions,
+  getLatestQuote,
   getMarketBars,
   getMarketDataDiagnostics,
   getOptionChain,
@@ -508,6 +509,20 @@ router.get("/agent/bars", async (req, res): Promise<void> => {
 
 router.get("/agent/diagnostics/market-data", (req, res): void => {
   res.json(getMarketDataDiagnostics());
+});
+
+router.get("/agent/quote", async (req, res): Promise<void> => {
+  const symbol = String(req.query["symbol"] ?? "").trim().toUpperCase();
+  if (!symbol) {
+    res.status(400).json({ error: "symbol query parameter is required." });
+    return;
+  }
+  try {
+    res.json(await getLatestQuote(symbol));
+  } catch (error) {
+    req.log.error({ err: error }, "Latest quote fetch failed");
+    res.status(502).json({ error: error instanceof Error ? error.message : "Latest quote fetch failed" });
+  }
 });
 
 router.get("/agent/options/:underlying", async (req, res): Promise<void> => {

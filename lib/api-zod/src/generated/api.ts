@@ -487,6 +487,28 @@ export const GetMarketBarsResponse = zod.object({
 
 
 /**
+ * Returns the most recent trade from Alpaca's market data. Frontend polls this every few seconds for a live price — WebSocket streaming is not viable on serverless, so this is the honest real-time mechanism.
+ * @summary Latest trade for a symbol (real-time poll endpoint)
+ */
+export const getLatestQuoteQuerySymbolMax = 12;
+
+
+
+export const GetLatestQuoteQueryParams = zod.object({
+  "symbol": zod.coerce.string().min(1).max(getLatestQuoteQuerySymbolMax)
+})
+
+export const GetLatestQuoteResponse = zod.object({
+  "symbol": zod.string(),
+  "price": zod.number().nullish(),
+  "size": zod.number().nullish(),
+  "timestamp": zod.string().nullish(),
+  "feed": zod.string(),
+  "live": zod.boolean().describe('false in demo mode (no real Alpaca data source).')
+})
+
+
+/**
  * Lists the most recent upstream bar fetch failures and the feed fallback order, so empty charts and scans can be explained.
  * @summary Recent market-data fetch diagnostics
  */

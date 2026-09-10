@@ -668,6 +668,57 @@ export async function getMarketBars(
 }
 
 /**
+ * Latest trade for a symbol from Alpaca's market data (v2/stocks/{symbol}/trades/latest).
+ * The frontend polls this every few seconds for a live price — WebSocket
+ * streaming is not viable on Vercel serverless, so this is the real-time
+ * mechanism. `live: false` in demo mode (no real data source).
+ */
+export async function getLatestQuote(symbol: string) {
+  const sym = symbol.trim().toUpperCase();
+  if (!sym) throw new Error("Symbol is required.");
+  if (!hasCredentials()) {
+    const bars = demoBars(sym);
+    return {
+      symbol: sym,
+      price: bars.at(-1)?.close ?? null,
+      size: null,
+      timestamp: new Date().toISOString(),
+      feed: "demo",
+      live: false,
+    };
+  }
+  const response = await fetch(
+    `${MARKET_DATA_URL}/stocks/${encodeURIComponent(sym)}/trades/latest`,
+    {
+      headers: {
+        "APCA-API-KEY-ID": getAlpacaCredentials().apiKey,
+        "APCA-API-SECRET-KEY": getAlpacaCredentials().apiSecret,
+      },
+    },
+  );
+  if (!response.ok) {
+    const message = await response.text();
+    recordMarketDataFailure(new Error(`latest trade ${response.status}: ${message.slice(0, 200)}`), "latest");
+    const error = new Error(`Market data ${response.status}: ${message.slice(0, 300)}`) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
+  }
+  const payload = (await response.json()) as {
+    trade?: { p?: number; s?: number; t?: string };
+    symbol?: string;
+  };
+  const trade = payload.trade;
+  return {
+    symbol: sym,
+    price: trade?.p ?? null,
+    size: trade?.s ?? null,
+    timestamp: trade?.t ?? null,
+    feed: "latest",
+    live: true,
+  };
+}
+
+/**
  * Option chain snapshot (US equity/ETF options, OCC symbols) from Alpaca's
  * options market data. Available in the paper environment by default per
  * Alpaca's options-trading docs. Requires credentials.

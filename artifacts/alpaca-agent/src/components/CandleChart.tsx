@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useGetAgentAssets, useGetMarketBars } from '@workspace/api-client-react';
+import { useGetAgentAssets, useGetMarketBars, useGetLatestQuote } from '@workspace/api-client-react';
 import type { MarketBars, GetMarketBarsTimeframe, TradableAsset } from '@workspace/api-client-react';
 
 /**
@@ -70,10 +70,24 @@ export function CandleChart({
   const feed = data?.feed ?? (barsQuery.isError ? 'error' : '—');
   const showEmpty = !barsQuery.isLoading && bars.length === 0;
 
+  // Real-time layer: poll the latest trade from Alpaca every 5 seconds.
+  // (WebSocket streaming is not viable on serverless; this is the honest
+  // live-price mechanism — labelled LIVE vs DELAYED vs DEMO.)
+  const quoteQuery = useGetLatestQuote(
+    { symbol },
+    { query: { queryKey: ['agent-quote', symbol], refetchInterval: 5_000, staleTime: 0, retry: 1 } },
+  );
+  const quote = quoteQuery.data;
+  const liveLabel = quote?.live ? 'LIVE' : quote?.feed === 'demo' ? 'DEMO' : 'DELAYED';
+  const liveColor = quote?.live ? '#22c55e' : '#f59e0b';
+
   const last = bars.at(-1);
   const prev = bars.at(-2);
-  const changeAbs = last && prev ? last.c - prev.c : 0;
-  const changePct = last && prev && prev.c ? (changeAbs / prev.c) * 100 : 0;
+  // Live quote takes precedence over the last closed bar for the header price.
+  const displayPrice = quote?.price ?? last?.c ?? null;
+  const referencePrice = prev?.c ?? last?.c ?? null;
+  const changeAbs = displayPrice != null && referencePrice != null ? displayPrice - referencePrice : 0;
+  const changePct = displayPrice != null && referencePrice ? (changeAbs / referencePrice) * 100 : 0;
   const upDay = changeAbs >= 0;
 
   const plotW = CHART_W - PAD.left - PAD.right;
@@ -177,12 +191,28 @@ export function CandleChart({
           )}
         </div>
 
-        {last && (
+        {displayPrice != null && (
           <span style={{ fontSize: 16, fontWeight: 700, fontFamily: 'monospace' }}>
-            ${last.c.toFixed(2)}
+            ${displayPrice.toFixed(2)}
             <span style={{ fontSize: 12, marginLeft: 8, color: upDay ? '#22c55e' : '#ef4444' }}>
               {upDay ? '▲' : '▼'} {Math.abs(changeAbs).toFixed(2)} ({changePct >= 0 ? '+' : ''}
               {changePct.toFixed(2)}%)
+            </span>
+            <span
+              style={{
+                fontSize: 9,
+                marginLeft: 10,
+                padding: '2px 7px',
+                borderRadius: 999,
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                background: `${liveColor}22`,
+                color: liveColor,
+                border: `1px solid ${liveColor}55`,
+              }}
+              title={quote?.live ? 'Real-time trade from Alpaca, refreshed every 5s' : 'Not a real-time price — see badge meaning'}
+            >
+              {liveLabel}
             </span>
           </span>
         )}

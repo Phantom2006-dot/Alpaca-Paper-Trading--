@@ -30,8 +30,10 @@ import type {
   ErrorResponse,
   FlattenResult,
   GetAgentAssetsParams,
+  GetLatestQuoteParams,
   GetMarketBarsParams,
   HealthStatus,
+  LatestQuote,
   ManualTradeInput,
   ManualTradeResult,
   MarketBars,
@@ -1124,6 +1126,91 @@ export function useGetMarketBars<TData = Awaited<ReturnType<typeof getMarketBars
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetMarketBarsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetLatestQuoteUrl = (params: GetLatestQuoteParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/agent/quote?${stringifiedParams}` : `/api/agent/quote`
+}
+
+/**
+ * Returns the most recent trade from Alpaca's market data. Frontend polls this every few seconds for a live price — WebSocket streaming is not viable on serverless, so this is the honest real-time mechanism.
+ * @summary Latest trade for a symbol (real-time poll endpoint)
+ */
+export const getLatestQuote = async (params: GetLatestQuoteParams, options?: Parameters<typeof customFetch>[1]): Promise<LatestQuote> => {
+
+  return customFetch<LatestQuote>(getGetLatestQuoteUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetLatestQuoteQueryKey = (params?: GetLatestQuoteParams,) => {
+    return [
+    `/api/agent/quote`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetLatestQuoteQueryOptions = <TData = Awaited<ReturnType<typeof getLatestQuote>>, TError = ErrorType<ErrorResponse>>(params: GetLatestQuoteParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getLatestQuote>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetLatestQuoteQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getLatestQuote>>> = ({ signal }) => getLatestQuote(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getLatestQuote>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetLatestQuoteQueryResult = NonNullable<Awaited<ReturnType<typeof getLatestQuote>>>
+export type GetLatestQuoteQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Latest trade for a symbol (real-time poll endpoint)
+ */
+
+export function useGetLatestQuote<TData = Awaited<ReturnType<typeof getLatestQuote>>, TError = ErrorType<ErrorResponse>>(
+ params: GetLatestQuoteParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getLatestQuote>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetLatestQuoteQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
