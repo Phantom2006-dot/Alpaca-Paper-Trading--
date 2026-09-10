@@ -17,6 +17,11 @@ All completed work is recorded here after every prompt request.
 - Deploying from `artifacts/api-server/` (its `.vercel/project.json` also points to `kairo-api`) uploads **without** `pnpm-lock.yaml` → Vercel falls back to `npm install` → `workspace:*` protocol fails → build Error. **The correct deployment root is the repo root**, whose `vercel.json` pins `installCommand: pnpm install --frozen-lockfile` and builds via pnpm filter. Backend redeployed from repo root → Ready, healthz OK.
 - Frontend: `vercel build --prod` died on a stale esbuild binary (host lib 0.27.3 vs downloaded binary 0.27.0; fixed with `node install.js`) but its own re-prune kept breaking vite. Deployed via **manual Build Output API** (`dist/public` → `.vercel/output/static`, `vercel deploy --prebuilt --prod`) and **explicitly re-aliased** `kairo-trade-agent.vercel.app` → new deployment.
 - **Proof of live UI**: alias HTML references bundle `index-B-_zeP5R.js`, byte-identical hash to local build; greps for "Place paper order", "candlestick", "Search symbol", "Market data diagnostics" all hit in the **live** bundle.
+- **SPA routes fix (POST-DEPLOY)**: the first manual prebuilt deploy omitted `routes` in `.vercel/output/config.json`, so deep links (`/dashboard`, `/chat`, …) returned 404 while `/` worked. The config **must** contain the filesystem-then-rewrite pair:
+  ```json
+  { "version": 3, "routes": [ { "handle": "filesystem" }, { "src": "/(.*)", "dest": "/index.html" } ] }
+  ```
+  Redeployed prebuilt + re-aliased. Verified live: `/`, `/dashboard`, `/chat`, `/console`, `/credentials` all **200** serving the app HTML (`<title>Alpaca Agent</title>`) with the same verified bundle. NOTE: `.vercel/` is gitignored, so future prebuilt deploys must recreate this config (or deploy from repo root where `vercel.json` rewrites exist).
 
 ### Verification (all real, no assumptions)
 - Backend typecheck ✓, 20/20 unit tests ✓ (`node node_modules/.pnpm/tsx@4.23.1/node_modules/tsx/dist/cli.mjs --test artifacts/api-server/src/lib/*.test.ts`).
