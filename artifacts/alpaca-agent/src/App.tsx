@@ -731,7 +731,8 @@ function DashboardPage() {
         <div className="space-y-5">
           <AccountStrip account={dashboard.account} />
           <MetricRail metrics={dashboard.metrics} />
-          <CandleChart symbol={selectedSymbol || 'SPY'} timeframe="1Day" />
+          {/* TradingView-style chart: symbol switcher inside the chart + driven by scanner-row clicks */}
+          <CandleChart symbol={selectedSymbol || undefined} onSymbolChange={setSelectedSymbol} />
           <div className="panel">
             <div className="card-header">
               <div>
