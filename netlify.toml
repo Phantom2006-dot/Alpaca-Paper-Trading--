@@ -1,0 +1,8 @@
+[build]
+  command = "pnpm --filter @workspace/alpaca-agent... run build"
+  publish = "artifacts/alpaca-agent/dist/public"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
